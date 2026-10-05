@@ -1641,7 +1641,7 @@ export default function App() {
               )}
             </button>
 
-            {showNotificationMenu && <div className="absolute right-0 top-[calc(100%+10px)] z-[1000] w-[min(20rem,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-black/10 bg-white shadow-2xl">
+            {showNotificationMenu && (\n              <div className="absolute right-0 top-[calc(100%+10px)] z-[1000] w-[min(20rem,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-black/10 bg-white shadow-2xl">
               <div className="h-1 bg-indigo-600" />
               <div className="p-4">
                 <div className="flex items-start gap-3">
@@ -1672,7 +1672,7 @@ export default function App() {
                   </button>
                 )}
               </div>
-            </div>}          </div>
+              </div>\n            )}\n          </div>
 
           {canInstallApp && (
             <button
