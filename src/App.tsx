@@ -1641,39 +1641,40 @@ export default function App() {
               )}
             </button>
 
-            {showNotificationMenu && (\n              <div className="absolute right-0 top-[calc(100%+10px)] z-[1000] w-[min(20rem,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-black/10 bg-white shadow-2xl">
-              <div className="h-1 bg-indigo-600" />
-              <div className="p-4">
-                <div className="flex items-start gap-3">
-                  <div className="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
-                    <Bell size={17} />
+            {showNotificationMenu && (
+              <div className="absolute right-0 top-[calc(100%+10px)] z-[1000] w-[min(20rem,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-black/10 bg-white shadow-2xl">
+                <div className="h-1 bg-indigo-600" />
+                <div className="p-4">
+                  <div className="flex items-start gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
+                      <Bell size={17} />
+                    </div>
+                    <div>
+                      <p className="text-sm font-black text-slate-800">Latest Note Notifications</p>
+                      <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                        Get a short summary of your latest note as a browser notification.
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-sm font-black text-slate-800">Latest Note Notifications</p>
-                    <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                      Get a short summary of your latest note as a browser notification.
-                    </p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={requestNoteNotifications}
-                  className="mt-4 w-full px-4 py-2.5 rounded-xl bg-indigo-600 text-white text-[11px] font-black uppercase tracking-widest hover:bg-indigo-700 transition-colors"
-                >
-                  {notificationPermission === 'denied' ? 'Allow in Browser Settings' : 'Enable Notifications'}
-                </button>
-                {notificationPermission === 'granted' && (
                   <button
                     type="button"
-                    onClick={notifyLatestNote}
-                    className="mt-2 w-full px-4 py-2.5 rounded-xl bg-slate-100 text-slate-700 text-[11px] font-black uppercase tracking-widest hover:bg-slate-200 transition-colors"
+                    onClick={requestNoteNotifications}
+                    className="mt-4 w-full px-4 py-2.5 rounded-xl bg-indigo-600 text-white text-[11px] font-black uppercase tracking-widest hover:bg-indigo-700 transition-colors"
                   >
-                    Summarise Last Note
+                    {notificationPermission === 'denied' ? 'Allow in Browser Settings' : 'Enable Notifications'}
                   </button>
-                )}
+                  {notificationPermission === 'granted' && (
+                    <button
+                      type="button"
+                      onClick={notifyLatestNote}
+                      className="mt-2 w-full px-4 py-2.5 rounded-xl bg-slate-100 text-slate-700 text-[11px] font-black uppercase tracking-widest hover:bg-slate-200 transition-colors"
+                    >
+                      Summarise Last Note
+                    </button>
+                  )}
+                </div>
               </div>
-              </div>\n            )}\n          </div>
-
+            )}
           {canInstallApp && (
             <button
               onClick={installApp}
