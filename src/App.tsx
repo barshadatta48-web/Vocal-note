@@ -370,6 +370,9 @@ export default function App() {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [offlineStorageReady, setOfflineStorageReady] = useState(false);
   const offlineSaveTimerRef = useRef<number | null>(null);
+  const [deferredInstallPrompt, setDeferredInstallPrompt] = useState<any>(null);
+  const [isAppInstalled, setIsAppInstalled] = useState(false);
+  const [showIosInstallHelp, setShowIosInstallHelp] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'board'>('grid');
   const [dashboardColor, setDashboardColor] = useState('#fcfaf7');
   const [isTemplatesModalOpen, setIsTemplatesModalOpen] = useState(false);
@@ -421,6 +424,56 @@ export default function App() {
 
   // Initialize Gemini
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
+  // Install experience: capture the browser's native install prompt and
+  // detect standalone mode so the install control disappears after installation.
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(display-mode: standalone)');
+    const updateInstalledState = () => {
+      const iosStandalone = (window.navigator as any).standalone === true;
+      setIsAppInstalled(mediaQuery.matches || iosStandalone);
+    };
+
+    const handleBeforeInstallPrompt = (event: Event) => {
+      event.preventDefault();
+      setDeferredInstallPrompt(event);
+    };
+
+    const handleAppInstalled = () => {
+      setDeferredInstallPrompt(null);
+      setIsAppInstalled(true);
+    };
+
+    updateInstalledState();
+    mediaQuery.addEventListener?.('change', updateInstalledState);
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.addEventListener('appinstalled', handleAppInstalled);
+
+    return () => {
+      mediaQuery.removeEventListener?.('change', updateInstalledState);
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('appinstalled', handleAppInstalled);
+    };
+  }, []);
+
+  const isIosDevice = /iphone|ipad|ipod/i.test(window.navigator.userAgent);
+  const canInstallApp = !isAppInstalled && (!!deferredInstallPrompt || isIosDevice);
+
+  const installApp = async () => {
+    if (deferredInstallPrompt) {
+      deferredInstallPrompt.prompt();
+      const choice = await deferredInstallPrompt.userChoice;
+      if (choice?.outcome === 'accepted') {
+        setIsAppInstalled(true);
+      }
+      setDeferredInstallPrompt(null);
+      return;
+    }
+
+    if (isIosDevice) {
+      setShowIosInstallHelp(true);
+    }
+  };
 
   // Load notes and templates from durable offline storage.
   // IndexedDB is the primary store; existing localStorage data is migrated once.
@@ -1468,6 +1521,18 @@ export default function App() {
 
           <div className="hidden md:block h-4 w-px bg-black/10 mx-1" />
 
+          {canInstallApp && (
+            <button
+              onClick={installApp}
+              className="p-2 md:px-4 md:py-2.5 bg-teal-600 text-white rounded-xl md:rounded-2xl hover:bg-teal-700 transition-all shadow-sm flex items-center gap-2"
+              title="Install Vocal Note"
+              aria-label="Install Vocal Note"
+            >
+              <Download size={18} />
+              <span className="hidden md:inline text-[10px] font-black uppercase tracking-widest">Install</span>
+            </button>
+          )}
+
           {/* Storage Buttons - Hide on very small screens or group */}
           <div className="hidden sm:flex items-center gap-1">
             <button
@@ -1506,6 +1571,48 @@ export default function App() {
         </div>
       </header>
 
+
+      <AnimatePresence>
+        {showIosInstallHelp && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[200] bg-black/30 backdrop-blur-sm flex items-center justify-center p-4"
+            onClick={() => setShowIosInstallHelp(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, y: 16, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 16, scale: 0.98 }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-sm bg-white rounded-3xl shadow-2xl border border-black/10 p-6 text-slate-700"
+            >
+              <div className="flex items-center justify-between mb-5">
+                <div>
+                  <h2 className="text-lg font-black">Install Vocal Note</h2>
+                  <p className="text-xs text-slate-400 mt-1">Add it to your iPhone/iPad Home Screen.</p>
+                </div>
+                <button onClick={() => setShowIosInstallHelp(false)} className="p-2 rounded-full hover:bg-black/5" aria-label="Close">
+                  <X size={18} />
+                </button>
+              </div>
+              <ol className="space-y-3 text-sm font-medium">
+                <li><span className="font-black">1.</span> Open Vocal Note in Safari.</li>
+                <li><span className="font-black">2.</span> Tap the <strong>Share</strong> button.</li>
+                <li><span className="font-black">3.</span> Choose <strong>Add to Home Screen</strong>.</li>
+                <li><span className="font-black">4.</span> Tap <strong>Add</strong> to finish.</li>
+              </ol>
+              <button
+                onClick={() => setShowIosInstallHelp(false)}
+                className="mt-6 w-full py-3 bg-indigo-600 text-white rounded-2xl font-black text-sm"
+              >
+                Done
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <main className={`mx-auto pt-[100px] md:pt-[140px] pb-12 relative z-10 ${viewMode === 'grid' ? 'max-w-[1600px] px-4 md:px-8' : 'w-full min-h-[2000px]'}`}>
         {notes.length === 0 ? (
