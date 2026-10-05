@@ -38,7 +38,6 @@ export function registerPWA(handlers: PWAUpdateHandlers = {}) {
           });
         });
 
-        // Check periodically for a newer service worker while the app is open.
         window.setInterval(() => {
           if (navigator.onLine) void reg.update();
         }, 60 * 60 * 1000);
@@ -51,6 +50,13 @@ export function registerPWA(handlers: PWAUpdateHandlers = {}) {
 
 export function activatePWAUpdate() {
   if (!registration?.waiting) return;
-  registration.waiting.postMessage({ type: 'SKIP_WAITING' });
-  window.location.reload();
+
+  const waitingWorker = registration.waiting;
+  waitingWorker.postMessage({ type: 'SKIP_WAITING' });
+
+  const reload = () => window.location.reload();
+  navigator.serviceWorker.addEventListener('controllerchange', reload, { once: true });
+
+  // Safety fallback if the browser does not emit controllerchange promptly.
+  window.setTimeout(reload, 3000);
 }
