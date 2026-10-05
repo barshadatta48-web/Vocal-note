@@ -8,6 +8,7 @@ import { Plus, Trash2, Edit3, Check, X, Palette, MessageCircle, Send, Sparkles, 
 import { motion, AnimatePresence } from 'motion/react';
 import { GoogleGenAI } from "@google/genai";
 import { loadOfflineSnapshot, saveOfflineSnapshot } from './offlineStorage';
+import { activatePWAUpdate } from './pwa';
 
 import { Stage, Layer, Line as KonvaLine } from 'react-konva';
 
@@ -373,6 +374,8 @@ export default function App() {
   const [deferredInstallPrompt, setDeferredInstallPrompt] = useState<any>(null);
   const [isAppInstalled, setIsAppInstalled] = useState(false);
   const [showIosInstallHelp, setShowIosInstallHelp] = useState(false);
+  const [isOnline, setIsOnline] = useState(() => navigator.onLine);
+  const [updateAvailable, setUpdateAvailable] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'board'>('grid');
   const [dashboardColor, setDashboardColor] = useState('#fcfaf7');
   const [isTemplatesModalOpen, setIsTemplatesModalOpen] = useState(false);
@@ -425,8 +428,7 @@ export default function App() {
   // Initialize Gemini
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-  // Install experience: capture the browser's native install prompt and
-  // detect standalone mode so the install control disappears after installation.
+  // Install experience, connection status, and service-worker updates.
   useEffect(() => {
     const mediaQuery = window.matchMedia('(display-mode: standalone)');
     const updateInstalledState = () => {
@@ -444,16 +446,42 @@ export default function App() {
       setIsAppInstalled(true);
     };
 
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+
     updateInstalledState();
+    setIsOnline(navigator.onLine);
     mediaQuery.addEventListener?.('change', updateInstalledState);
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
     window.addEventListener('appinstalled', handleAppInstalled);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
 
     return () => {
       mediaQuery.removeEventListener?.('change', updateInstalledState);
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
       window.removeEventListener('appinstalled', handleAppInstalled);
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
     };
+  }, []);
+
+  useEffect(() => {
+    if (!import.meta.env.PROD || !('serviceWorker' in navigator)) return;
+
+    navigator.serviceWorker.ready.then((registration) => {
+      if (registration.waiting) setUpdateAvailable(true);
+
+      registration.addEventListener('updatefound', () => {
+        const worker = registration.installing;
+        if (!worker) return;
+        worker.addEventListener('statechange', () => {
+          if (worker.state === 'installed' && navigator.serviceWorker.controller) {
+            setUpdateAvailable(true);
+          }
+        });
+      });
+    });
   }, []);
 
   const isIosDevice = /iphone|ipad|ipod/i.test(window.navigator.userAgent);
@@ -463,16 +491,12 @@ export default function App() {
     if (deferredInstallPrompt) {
       deferredInstallPrompt.prompt();
       const choice = await deferredInstallPrompt.userChoice;
-      if (choice?.outcome === 'accepted') {
-        setIsAppInstalled(true);
-      }
+      if (choice?.outcome === 'accepted') setIsAppInstalled(true);
       setDeferredInstallPrompt(null);
       return;
     }
 
-    if (isIosDevice) {
-      setShowIosInstallHelp(true);
-    }
+    if (isIosDevice) setShowIosInstallHelp(true);
   };
 
   // Load notes and templates from durable offline storage.
@@ -1569,6 +1593,22 @@ export default function App() {
             <span className="md:hidden">ADD</span>
           </button>
         </div>
+        {(!isOnline || updateAvailable) && (
+          <div className="absolute top-full left-0 right-0 flex justify-center pointer-events-none px-4 pt-2">
+            {!isOnline ? (
+              <div className="pointer-events-auto px-4 py-2 rounded-full bg-amber-100 text-amber-800 border border-amber-200 shadow-sm text-[11px] font-bold">
+                Offline mode — your notes are saved on this device.
+              </div>
+            ) : (
+              <button
+                onClick={() => { activatePWAUpdate(); setUpdateAvailable(false); }}
+                className="pointer-events-auto px-4 py-2 rounded-full bg-indigo-600 text-white shadow-lg text-[11px] font-black hover:bg-indigo-700 transition-colors"
+              >
+                New version available — Update
+              </button>
+            )}
+          </div>
+        )}
       </header>
 
 
