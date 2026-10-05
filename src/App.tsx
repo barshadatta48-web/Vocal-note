@@ -369,6 +369,7 @@ export default function App() {
   const [notes, setNotes] = useState<Note[]>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [offlineStorageReady, setOfflineStorageReady] = useState(false);
+  const offlineSaveTimerRef = useRef<number | null>(null);
   const [viewMode, setViewMode] = useState<'grid' | 'board'>('grid');
   const [dashboardColor, setDashboardColor] = useState('#fcfaf7');
   const [isTemplatesModalOpen, setIsTemplatesModalOpen] = useState(false);
@@ -477,7 +478,22 @@ export default function App() {
   // workspace available even when the browser is offline or localStorage is full.
   useEffect(() => {
     if (!offlineStorageReady) return;
-    void saveOfflineSnapshot(notes, templates);
+
+    if (offlineSaveTimerRef.current !== null) {
+      window.clearTimeout(offlineSaveTimerRef.current);
+    }
+
+    offlineSaveTimerRef.current = window.setTimeout(() => {
+      void saveOfflineSnapshot(notes, templates);
+      offlineSaveTimerRef.current = null;
+    }, 250);
+
+    return () => {
+      if (offlineSaveTimerRef.current !== null) {
+        window.clearTimeout(offlineSaveTimerRef.current);
+        offlineSaveTimerRef.current = null;
+      }
+    };
   }, [notes, templates, offlineStorageReady]);
 
   useEffect(() => {
