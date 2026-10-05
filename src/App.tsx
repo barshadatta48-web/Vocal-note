@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Trash2, Edit3, Check, X, Palette, MessageCircle, Send, Sparkles, Loader2, Image as ImageIcon, Camera, MoreVertical, CheckCircle2, Mic, MicOff, Pencil, Eraser, ArrowLeft, Wand2, Bold, Type, Minus, Underline, Hand, Maximize, StickyNote, Download, Upload } from 'lucide-react';
+import { Plus, Trash2, Edit3, Check, X, Palette, MessageCircle, Send, Sparkles, Loader2, Image as ImageIcon, Camera, MoreVertical, CheckCircle2, Mic, MicOff, Pencil, Eraser, ArrowLeft, Wand2, Bold, Type, Minus, Underline, Hand, Maximize, StickyNote, Download, Upload, Bell, BellOff } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { GoogleGenAI } from "@google/genai";
 import { loadOfflineSnapshot, saveOfflineSnapshot } from './offlineStorage';
@@ -376,6 +376,10 @@ export default function App() {
   const [showIosInstallHelp, setShowIosInstallHelp] = useState(false);
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
   const [updateAvailable, setUpdateAvailable] = useState(false);
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | 'unsupported'>(
+    typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'unsupported'
+  );
+  const [showNotificationMenu, setShowNotificationMenu] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'board'>('grid');
   const [dashboardColor, setDashboardColor] = useState('#fcfaf7');
   const [isTemplatesModalOpen, setIsTemplatesModalOpen] = useState(false);
@@ -427,6 +431,11 @@ export default function App() {
 
   // Initialize Gemini
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('Notification' in window)) return;
+    setNotificationPermission(Notification.permission);
+  }, []);
 
   // Install experience, connection status, and service-worker updates.
   useEffect(() => {
@@ -497,6 +506,55 @@ export default function App() {
     }
 
     if (isIosDevice) setShowIosInstallHelp(true);
+  };
+
+  const getLastNoteSummary = (note?: Note) => {
+    if (!note) return 'You have no notes yet.';
+    const plainText = note.content
+      .replace(/<br\s*\/?>/gi, ' ')
+      .replace(/<[^>]*>/g, ' ')
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/&amp;/gi, '&')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (!plainText) return 'Your latest note is empty.';
+    const sentences = plainText.split(/(?<=[.!?])\s+/).filter(Boolean);
+    const summary = sentences.slice(0, 2).join(' ');
+    return (summary || plainText).slice(0, 180) + ((summary || plainText).length > 180 ? '…' : '');
+  };
+
+  const requestNoteNotifications = async () => {
+    if (!('Notification' in window)) {
+      setNotificationPermission('unsupported');
+      return;
+    }
+
+    const permission = await Notification.requestPermission();
+    setNotificationPermission(permission);
+
+    if (permission === 'granted') {
+      const lastNote = notes[0];
+      new Notification('Vocal Note — Latest Note', {
+        body: getLastNoteSummary(lastNote),
+        icon: '/icon.svg',
+        tag: 'vocal-note-latest-summary'
+      });
+    }
+  };
+
+  const notifyLatestNote = () => {
+    if (!('Notification' in window) || Notification.permission !== 'granted') {
+      setShowNotificationMenu(true);
+      return;
+    }
+
+    const lastNote = notes[0];
+    new Notification('Vocal Note — Latest Note', {
+      body: getLastNoteSummary(lastNote),
+      icon: '/icon.svg',
+      tag: 'vocal-note-latest-summary'
+    });
   };
 
   // Load notes and templates from durable offline storage.
@@ -1544,6 +1602,50 @@ export default function App() {
           </button>
 
           <div className="hidden md:block h-4 w-px bg-black/10 mx-1" />
+
+          <div className="relative">
+            <button
+              onClick={() => {
+                if (notificationPermission === 'granted') notifyLatestNote();
+                else setShowNotificationMenu(prev => !prev);
+              }}
+              className="p-2 md:p-3 rounded-xl md:rounded-2xl transition-all hover:bg-black/5 text-slate-400 hover:text-indigo-600 relative"
+              title={notificationPermission === 'granted' ? 'Show latest note summary' : 'Enable note notifications'}
+              aria-label={notificationPermission === 'granted' ? 'Show latest note summary' : 'Enable note notifications'}
+            >
+              {notificationPermission === 'granted' ? <Bell size={19} /> : <BellOff size={19} />}
+            </button>
+
+            {showNotificationMenu && (
+              <div className="absolute right-0 top-full mt-2 w-72 p-4 bg-white border border-black/10 rounded-2xl shadow-2xl z-[1000]">
+                <div className="flex items-start gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
+                    <Bell size={17} />
+                  </div>
+                  <div>
+                    <p className="text-sm font-black text-slate-800">Latest Note Notifications</p>
+                    <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                      Get a short summary of your latest note as a browser notification.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={requestNoteNotifications}
+                  className="mt-4 w-full px-4 py-2.5 rounded-xl bg-indigo-600 text-white text-[11px] font-black uppercase tracking-widest hover:bg-indigo-700 transition-colors"
+                >
+                  {notificationPermission === 'denied' ? 'Allow in Browser Settings' : 'Enable Notifications'}
+                </button>
+                {notificationPermission === 'granted' && (
+                  <button
+                    onClick={notifyLatestNote}
+                    className="mt-2 w-full px-4 py-2.5 rounded-xl bg-slate-100 text-slate-700 text-[11px] font-black uppercase tracking-widest hover:bg-slate-200 transition-colors"
+                  >
+                    Summarise Last Note
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
 
           {canInstallApp && (
             <button
