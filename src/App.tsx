@@ -1672,6 +1672,7 @@ export default function App() {
                     Summarise Last Note
                   </button>
                 )}
+                </div>
               </div>
             )}
           </div>
