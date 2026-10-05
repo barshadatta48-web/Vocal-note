@@ -430,7 +430,7 @@ export default function App() {
   const [micErrorMessage, setMicErrorMessage] = useState<string | null>(null);
 
   // Initialize Gemini
-  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+  const ai = process.env.GEMINI_API_KEY ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY }) : null;
 
   useEffect(() => {
     if (typeof window === 'undefined' || !('Notification' in window)) return;
@@ -1081,6 +1081,10 @@ export default function App() {
       const prompt = type === 'template' 
         ? "Generate a creative and structured note template. Return HTML content."
         : `Continue or enhance this note content: "${editContent || 'Ideas for the week'}"`;
+
+      if (!ai) throw new Error('Gemini API key is not configured.');
+
+      if (!ai) throw new Error('Gemini API key is not configured.');
 
       const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
