@@ -1641,10 +1641,9 @@ export default function App() {
               )}
             </button>
 
-            {showNotificationMenu && (
-              <div className="absolute right-0 top-[calc(100%+10px)] z-[1000] w-[min(20rem,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-black/10 bg-white shadow-2xl">
-                <div className="h-1 bg-indigo-600" />
-                <div className="p-4">
+            {showNotificationMenu && <div className="absolute right-0 top-[calc(100%+10px)] z-[1000] w-[min(20rem,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-black/10 bg-white shadow-2xl">
+              <div className="h-1 bg-indigo-600" />
+              <div className="p-4">
                 <div className="flex items-start gap-3">
                   <div className="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
                     <Bell size={17} />
@@ -1672,10 +1671,8 @@ export default function App() {
                     Summarise Last Note
                   </button>
                 )}
-                </div>
               </div>
-            )}
-          </div>
+            </div>}          </div>
 
           {canInstallApp && (
             <button
