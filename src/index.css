@@ -1,0 +1,93 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", "Helvetica Neue", Arial, sans-serif;
+  
+  --color-minimal-bg: #fcfaf7;
+  --color-premium-slate: #0f172a;
+  --color-premium-indigo: #312e81;
+  
+  --color-note-red: #fff1f2;
+  --color-note-orange: #fff7ed;
+  --color-note-yellow: #fefce8;
+  --color-note-green: #f0fdf4;
+  --color-note-blue: #f0f9ff;
+  --color-note-indigo: #eef2ff;
+  --color-note-purple: #faf5ff;
+  --color-note-gray: #f8fafc;
+  --color-note-mint: #f0fdfa;
+  --color-note-rose: #fff1f2;
+}
+
+@layer utilities {
+  .pattern-dots {
+    background-image: radial-gradient(rgba(0,0,0,0.05) 1px, transparent 1px);
+    background-size: 15px 15px;
+  }
+  .pattern-lines {
+    background-image: repeating-linear-gradient(0deg, transparent, transparent 20px, rgba(0,0,0,0.03) 20px, rgba(0,0,0,0.03) 21px);
+  }
+  .pattern-grid {
+    background-image: linear-gradient(rgba(0,0,0,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(0,0,0,0.03) 1px, transparent 1px);
+    background-size: 20px 20px;
+  }
+  @keyframes rainbow-border {
+    0% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+  }
+  .animate-rainbow-slow {
+    background: 
+      radial-gradient(circle at 0% 0%, #312e810a 0%, transparent 40%),
+      radial-gradient(circle at 100% 100%, #312e810d 0%, transparent 40%),
+      var(--color-minimal-bg);
+    background-size: 200% 200%;
+    animation: rainbow-border 20s ease infinite;
+  }
+
+  .bg-premium-header {
+    background: var(--color-minimal-bg);
+    backdrop-filter: blur(20px);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+    box-shadow: 0 4px 20px -5px rgba(0, 0, 0, 0.05);
+  }
+
+  .paper-texture {
+    background-image: url("https://www.transparenttextures.com/patterns/notebook.png");
+    background-blend-mode: multiply;
+  }
+
+  .note-shadow {
+    box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  }
+
+  .note-shadow-hover {
+    box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+  }
+}
+
+@layer components {
+  .note-corner-fold {
+    position: relative;
+    clip-path: polygon(0 0, 100% 0, 100% calc(100% - 20px), calc(100% - 20px) 100%, 0 100%);
+  }
+
+  .note-corner-fold::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    width: 25px;
+    height: 25px;
+    background: rgba(0,0,0,0.05);
+    box-shadow: -2px -2px 10px rgba(0,0,0,0.1);
+    border-radius: 4px 0 0 0;
+    transition: all 0.3s ease;
+  }
+
+  .bg-note-red::after { background: rgba(220, 38, 38, 0.1); }
+  .bg-note-blue::after { background: rgba(37, 99, 235, 0.1); }
+  .bg-note-green::after { background: rgba(22, 163, 74, 0.1); }
+  .bg-note-purple::after { background: rgba(147, 51, 234, 0.1); }
+}
+
