@@ -437,6 +437,20 @@ export default function App() {
     setNotificationPermission(Notification.permission);
   }, []);
 
+  useEffect(() => {
+    if (!showNotificationMenu) return;
+
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (!target.closest('[data-notification-control]')) {
+        setShowNotificationMenu(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handlePointerDown);
+    return () => document.removeEventListener('mousedown', handlePointerDown);
+  }, [showNotificationMenu]);
+
   // Install experience, connection status, and service-worker updates.
   useEffect(() => {
     const mediaQuery = window.matchMedia('(display-mode: standalone)');
@@ -1607,21 +1621,30 @@ export default function App() {
 
           <div className="hidden md:block h-4 w-px bg-black/10 mx-1" />
 
-          <div className="relative">
+          <div className="relative" data-notification-control>
             <button
+              type="button"
               onClick={() => {
-                if (notificationPermission === 'granted') notifyLatestNote();
-                else setShowNotificationMenu(prev => !prev);
+                if (notificationPermission === 'granted') {
+                  notifyLatestNote();
+                } else {
+                  setShowNotificationMenu(prev => !prev);
+                }
               }}
-              className="p-2 md:p-3 rounded-xl md:rounded-2xl transition-all hover:bg-black/5 text-slate-400 hover:text-indigo-600 relative"
+              className="relative flex h-10 w-10 md:h-11 md:w-11 items-center justify-center rounded-full border border-black/10 bg-white/80 text-slate-500 shadow-sm backdrop-blur transition-all hover:-translate-y-0.5 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-600 hover:shadow-md active:translate-y-0"
               title={notificationPermission === 'granted' ? 'Show latest note summary' : 'Enable note notifications'}
               aria-label={notificationPermission === 'granted' ? 'Show latest note summary' : 'Enable note notifications'}
             >
-              {notificationPermission === 'granted' ? <Bell size={19} /> : <BellOff size={19} />}
+              {notificationPermission === 'granted' ? <Bell size={19} strokeWidth={2.2} /> : <BellOff size={19} strokeWidth={2.2} />}
+              {notificationPermission !== 'granted' && notificationPermission !== 'unsupported' && (
+                <span className="absolute right-0.5 top-0.5 h-2.5 w-2.5 rounded-full border-2 border-white bg-indigo-600" aria-hidden="true" />
+              )}
             </button>
 
             {showNotificationMenu && (
-              <div className="absolute right-0 top-full mt-2 w-72 p-4 bg-white border border-black/10 rounded-2xl shadow-2xl z-[1000]">
+              <div className="absolute right-0 top-[calc(100%+10px)] z-[1000] w-[min(20rem,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-black/10 bg-white shadow-2xl">
+                <div className="h-1 bg-indigo-600" />
+                <div className="p-4">
                 <div className="flex items-start gap-3">
                   <div className="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
                     <Bell size={17} />
@@ -1634,6 +1657,7 @@ export default function App() {
                   </div>
                 </div>
                 <button
+                  type="button"
                   onClick={requestNoteNotifications}
                   className="mt-4 w-full px-4 py-2.5 rounded-xl bg-indigo-600 text-white text-[11px] font-black uppercase tracking-widest hover:bg-indigo-700 transition-colors"
                 >
@@ -1641,6 +1665,7 @@ export default function App() {
                 </button>
                 {notificationPermission === 'granted' && (
                   <button
+                    type="button"
                     onClick={notifyLatestNote}
                     className="mt-2 w-full px-4 py-2.5 rounded-xl bg-slate-100 text-slate-700 text-[11px] font-black uppercase tracking-widest hover:bg-slate-200 transition-colors"
                   >
