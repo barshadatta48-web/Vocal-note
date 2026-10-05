@@ -7,6 +7,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Plus, Trash2, Edit3, Check, X, Palette, MessageCircle, Send, Sparkles, Loader2, Image as ImageIcon, Camera, MoreVertical, CheckCircle2, Mic, MicOff, Pencil, Eraser, ArrowLeft, Wand2, Bold, Type, Minus, Underline, Hand, Maximize, StickyNote, Download, Upload } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { GoogleGenAI } from "@google/genai";
+import { loadOfflineSnapshot, saveOfflineSnapshot } from './offlineStorage';
 
 import { Stage, Layer, Line as KonvaLine } from 'react-konva';
 
@@ -367,6 +368,7 @@ function isCaretAtStartOfNode(container: Node, offset: number, rootNode: Node): 
 export default function App() {
   const [notes, setNotes] = useState<Note[]>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
+  const [offlineStorageReady, setOfflineStorageReady] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'board'>('grid');
   const [dashboardColor, setDashboardColor] = useState('#fcfaf7');
   const [isTemplatesModalOpen, setIsTemplatesModalOpen] = useState(false);
@@ -419,80 +421,64 @@ export default function App() {
   // Initialize Gemini
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-  // Load notes and templates from localStorage
+  // Load notes and templates from durable offline storage.
+  // IndexedDB is the primary store; existing localStorage data is migrated once.
   useEffect(() => {
-    const savedNotes = localStorage.getItem('stickie-notes-rainbow');
-    if (savedNotes) {
-      try {
-        setNotes(JSON.parse(savedNotes));
-      } catch (e) {
-        console.error('Failed to parse notes from local storage', e);
-      }
-    }
-    const savedTemplates = localStorage.getItem('stickie-templates-rainbow');
-    if (savedTemplates) {
-      try {
-        setTemplates(JSON.parse(savedTemplates));
-      } catch (e) {
-        console.error('Failed to parse templates', e);
-      }
-    }
+    let cancelled = false;
 
-    // Auto-popup AI assistant for new users
-    const hasVisited = localStorage.getItem('vocal-note-visited');
-    if (!hasVisited) {
-      setTimeout(() => {
-        const welcomeId = Date.now().toString();
-        const welcomeNote: Note = {
-          id: welcomeId,
-          content: `
-            <h1 style="font-size: 1.5em; font-weight: 900; margin-bottom: 0.5em;">Welcome to Vocal Note! 🎤</h1>
-            <p>Your premium space for voice-captured thoughts. Try these features:</p>
-            <ul style="margin-top: 1em; list-style-type: disc; padding-left: 1.5em;">
-              <li><b>Voice Dictation:</b> Hit the mic and start talking.</li>
-              <li><b>AI Assistant:</b> Brainstorm ideas right in the chat.</li>
-              <li><b>Sketch Mode:</b> Draw your visions with the pencil tool.</li>
-            </ul>
-            <p style="margin-top: 1em; font-style: italic; opacity: 0.7;">Feel free to delete this note or make it your own!</p>
-          `,
-          color: 'bg-note-indigo',
-          rotation: -1 + Math.random() * 2,
-          x: 100,
-          y: 100,
-        };
-        setNotes(prev => [welcomeNote, ...prev]);
-        setActiveNoteId(welcomeId);
-        setEditContent(welcomeNote.content);
-        setEditFontSize(48);
-        setIsChatOpen(true);
-        localStorage.setItem('vocal-note-visited', 'true');
-      }, 1000); // Small delay to let the UI settle
-    }
+    const load = async () => {
+      const snapshot = await loadOfflineSnapshot();
+      if (cancelled) return;
 
-    // Check microphone permission status initially
-    if (navigator.permissions && navigator.permissions.query) {
-      navigator.permissions.query({ name: 'microphone' as any }).then(result => {
-        setMicPermissionStatus(result.state);
-        result.onchange = () => {
+      if (snapshot) {
+        setNotes(snapshot.notes as Note[]);
+        setTemplates(snapshot.templates as Template[]);
+      }
+
+      setOfflineStorageReady(true);
+
+      const hasVisited = localStorage.getItem('vocal-note-visited');
+      if (!hasVisited && !(snapshot?.notes?.length)) {
+        setTimeout(() => {
+          const welcomeId = Date.now().toString();
+          const welcomeNote: Note = {
+            id: welcomeId,
+            content: `<h1 style="font-size: 1.5em; font-weight: 900; margin-bottom: 0.5em;">Welcome to Vocal Note! 🎤</h1><p>Your premium space for voice-captured thoughts. Try these features:</p><ul style="margin-top: 1em; list-style-type: disc; padding-left: 1.5em;"><li><b>Voice Dictation:</b> Hit the mic and start talking.</li><li><b>AI Assistant:</b> Brainstorm ideas right in the chat.</li><li><b>Sketch Mode:</b> Draw your visions with the pencil tool.</li></ul><p style="margin-top: 1em; font-style: italic; opacity: 0.7;">Feel free to delete this note or make it your own!</p>`,
+            color: 'bg-note-indigo', rotation: -1 + Math.random() * 2, x: 100, y: 100,
+          };
+          setNotes(prev => [welcomeNote, ...prev]);
+          setActiveNoteId(welcomeId);
+          setEditContent(welcomeNote.content);
+          setEditFontSize(48);
+          setIsChatOpen(true);
+          localStorage.setItem('vocal-note-visited', 'true');
+        }, 1000);
+      }
+
+      if (navigator.permissions && navigator.permissions.query) {
+        navigator.permissions.query({ name: 'microphone' as any }).then(result => {
           setMicPermissionStatus(result.state);
-        };
-      }).catch(err => {
-        console.warn("Permissions API not fully supported for microphone query:", err);
-      });
-    } else {
-      // Fallback for browsers that don't support permissions.query
-      setMicPermissionStatus('prompt');
-    }
+          result.onchange = () => setMicPermissionStatus(result.state);
+        }).catch(err => console.warn("Permissions API not fully supported for microphone query:", err));
+      } else {
+        setMicPermissionStatus('prompt');
+      }
+    };
+
+    load().catch((error) => {
+      console.error('Failed to initialize offline storage:', error);
+      setOfflineStorageReady(true);
+    });
+
+    return () => { cancelled = true; };
   }, []);
 
-  // Save to localStorage
+  // Persist the complete workspace after every change. IndexedDB keeps the
+  // workspace available even when the browser is offline or localStorage is full.
   useEffect(() => {
-    localStorage.setItem('stickie-notes-rainbow', JSON.stringify(notes));
-  }, [notes]);
-
-  useEffect(() => {
-    localStorage.setItem('stickie-templates-rainbow', JSON.stringify(templates));
-  }, [templates]);
+    if (!offlineStorageReady) return;
+    void saveOfflineSnapshot(notes, templates);
+  }, [notes, templates, offlineStorageReady]);
 
   useEffect(() => {
     localStorage.setItem('rainbow-notepad-view-mode', viewMode);
@@ -1923,6 +1909,15 @@ export default function App() {
                       }
                       const html = target.innerHTML;
                       setEditContent(html);
+                      // Persist the active draft immediately through the notes state.
+                      // This prevents data loss if the app is closed before Save & Close.
+                      if (activeNoteId) {
+                        setNotes(prev => prev.map(n =>
+                          n.id === activeNoteId
+                            ? { ...n, content: html, fontSize: editFontSize }
+                            : n
+                        ));
+                      }
                       checkSelection();
                     }}
                     onSelect={checkSelection}
