@@ -369,6 +369,7 @@ function isCaretAtStartOfNode(container: Node, offset: number, rootNode: Node): 
 export default function App() {
   const [notes, setNotes] = useState<Note[]>([]);
   const notesRef = useRef<Note[]>([]);
+  const templatesRef = useRef<Template[]>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [offlineStorageReady, setOfflineStorageReady] = useState(false);
   const offlineSaveTimerRef = useRef<number | null>(null);
@@ -632,7 +633,8 @@ export default function App() {
   // re-registering browser history listeners every time a note is edited.
   useEffect(() => {
     notesRef.current = notes;
-  }, [notes]);
+    templatesRef.current = templates;
+  }, [notes, templates]);
   
   useEffect(() => {
     activeNoteIdRef.current = activeNoteId;
@@ -648,7 +650,7 @@ export default function App() {
     }
 
     offlineSaveTimerRef.current = window.setTimeout(() => {
-      void saveOfflineSnapshot(notes, templates);
+      void saveOfflineSnapshot(notesRef.current, templatesRef.current);
       offlineSaveTimerRef.current = null;
     }, 250);
 
@@ -659,6 +661,13 @@ export default function App() {
       }
     };
   }, [notes, templates, offlineStorageReady]);
+
+  useEffect(() => {
+    if (!offlineStorageReady) return;
+    const flush = () => { void saveOfflineSnapshot(notesRef.current, templatesRef.current); };
+    window.addEventListener('pagehide', flush);
+    return () => window.removeEventListener('pagehide', flush);
+  }, [offlineStorageReady]);
 
   useEffect(() => {
     localStorage.setItem('rainbow-notepad-view-mode', viewMode);
@@ -686,10 +695,10 @@ export default function App() {
 
   useEffect(() => {
     if (editorRef.current && activeNoteId) {
-      editorRef.current.innerHTML = editContent;
+      if (editorRef.current.innerHTML !== editContent) editorRef.current.innerHTML = editContent;
       normalizeEditorUnderlines(editorRef.current);
     }
-  }, [activeNoteId]);
+  }, [activeNoteId, editContent]);
 
   // Keep browser navigation synchronized with the single-note editor.
   // The list is the base entry. Each opened note gets one dedicated entry.
@@ -787,6 +796,8 @@ export default function App() {
     };
     // Every note opens immediately in the dedicated single-page editor.
     // Use a functional update so the new note is never lost if state updates are batched.
+    lastLeavingNoteIdRef.current = null;
+    setShowLastNoteSummary(false);
     setNotes(prev => [newNote, ...prev]);
     setActiveNoteId(newNote.id);
     setIsDrawing(false);
@@ -837,6 +848,10 @@ export default function App() {
   const deleteNote = (id: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
     const deletingActiveNote = activeNoteId === id;
+    if (deletingActiveNote) {
+      lastLeavingNoteIdRef.current = null;
+      setShowLastNoteSummary(false);
+    }
     setNotes(prev => prev.filter(n => n.id !== id));
     setOpenMenuId(null);
     if (deletingActiveNote) {
@@ -868,11 +883,28 @@ export default function App() {
       reader.onload = (re) => {
         try {
           const data = JSON.parse(re.target?.result as string);
-          const importedNotes = Array.isArray(data?.notes) ? data.notes : null;
-          const importedTemplates = Array.isArray(data?.templates) ? data.templates : null;
+          const importedNotes = Array.isArray(data?.notes)
+            ? data.notes.filter((note: any) => note && typeof note === 'object' && typeof note.id === 'string' && typeof note.content === 'string').map((note: any) => ({
+                ...note,
+                color: typeof note.color === 'string' ? note.color : COLORS[0],
+                rotation: typeof note.rotation === 'number' ? note.rotation : 0,
+                x: typeof note.x === 'number' ? note.x : 50,
+                y: typeof note.y === 'number' ? note.y : 50,
+                fontSize: typeof note.fontSize === 'number' ? note.fontSize : 48,
+              }))
+            : null;
+          const importedTemplates = Array.isArray(data?.templates)
+            ? data.templates.filter((template: any) => template && typeof template === 'object' && typeof template.id === 'string' && typeof template.name === 'string' && typeof template.content === 'string').map((template: any) => ({
+                ...template,
+                color: typeof template.color === 'string' ? template.color : COLORS[0],
+                fontSize: typeof template.fontSize === 'number' ? template.fontSize : 48,
+              }))
+            : null;
           if (!importedNotes && !importedTemplates) throw new Error('Invalid backup structure');
           if (importedNotes) setNotes(importedNotes);
           if (importedTemplates) setTemplates(importedTemplates);
+          lastLeavingNoteIdRef.current = null;
+          setShowLastNoteSummary(false);
           setActiveNoteId(null);
           setIsDrawing(false);
           setIsChatOpen(false);
@@ -889,6 +921,8 @@ export default function App() {
 
   const startEditing = (note: Note, e?: React.MouseEvent) => {
     e?.stopPropagation();
+    lastLeavingNoteIdRef.current = null;
+    setShowLastNoteSummary(false);
     setActiveNoteId(note.id);
     setIsDrawing(false);
     setEditContent(note.content);
@@ -903,6 +937,8 @@ export default function App() {
 
   const startDrawing = (note: Note, e?: React.MouseEvent) => {
     e?.stopPropagation();
+    lastLeavingNoteIdRef.current = null;
+    setShowLastNoteSummary(false);
     setActiveNoteId(note.id);
     setIsDrawing(true);
     setEditContent(note.content);
@@ -1282,6 +1318,16 @@ export default function App() {
     setOpenMenuId(openMenuId === id ? null : id);
   };
 
+  useEffect(() => {
+    return () => {
+      const recognition = recognitionRef.current;
+      if (recognition) {
+        try { recognition.stop(); } catch {}
+      }
+      recognitionRef.current = null;
+    };
+  }, []);
+
   const startVoiceRecording = async (target: 'chat' | 'note' = 'chat', e?: React.MouseEvent) => {
     e?.stopPropagation();
     
@@ -1471,6 +1517,7 @@ export default function App() {
     const stage = e.target.getStage();
     const oldScale = stage.scaleX();
     const pointer = stage.getPointerPosition();
+    if (!pointer || !Number.isFinite(oldScale) || oldScale <= 0) return;
 
     const mousePointTo = {
       x: (pointer.x - stage.x()) / oldScale,
@@ -1478,7 +1525,8 @@ export default function App() {
     };
 
     const speed = 0.05;
-    const newScale = e.evt.deltaY > 0 ? oldScale * (1 - speed) : oldScale * (1 + speed);
+    const rawScale = e.evt.deltaY > 0 ? oldScale * (1 - speed) : oldScale * (1 + speed);
+    const newScale = Math.min(4, Math.max(0.25, rawScale));
 
     setStageScale(newScale);
     setStagePos({
@@ -1536,7 +1584,8 @@ export default function App() {
         y: (newCenter.y - currPos.y) / currScale,
       };
 
-      const newScale = currScale * (dist / lastDist);
+      const rawScale = currScale * (dist / lastDist);
+      const newScale = Math.min(4, Math.max(0.25, rawScale));
 
       setStageScale(newScale);
       setStagePos({
@@ -1624,7 +1673,7 @@ export default function App() {
       }, 100);
     }
     
-    setNotes(prev => prev.map(n => n.id === activeNoteId ? { ...n, content: newContent, updatedAt: new Date() } : n));
+    setNotes(prev => prev.map(n => n.id === activeNoteId ? { ...n, content: newContent } : n));
   };
 
   return (
@@ -1698,1014 +1747,3 @@ export default function App() {
             </motion.div>
           )}
         </div>
-        
-        <div className="flex items-center gap-1 md:gap-[15px]">
-          {/* View Mode Toggle - Icon only on mobile */}
-          <div className="flex items-center bg-black/5 rounded-xl md:rounded-2xl p-0.5 md:p-1 border border-black/5">
-             <button
-              onClick={() => setViewMode('grid')}
-              className={`p-2 md:px-4 md:py-2 rounded-lg md:rounded-xl leading-none transition-all ${viewMode === 'grid' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-slate-600'}`}
-              title="Grid View"
-            >
-              <span className="hidden md:inline text-[10px] font-black uppercase tracking-widest">Grid</span>
-              <Maximize size={16} className="md:hidden" />
-            </button>
-            <button
-              onClick={() => setViewMode('board')}
-              className={`p-2 md:px-4 md:py-2 rounded-lg md:rounded-xl leading-none transition-all ${viewMode === 'board' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-slate-600'}`}
-              title="Board View"
-            >
-              <span className="hidden md:inline text-[10px] font-black uppercase tracking-widest">Board</span>
-              <Hand size={16} className="md:hidden" />
-            </button>
-          </div>
-
-          <div className="hidden xs:block h-4 w-px bg-black/10 mx-1" />
-
-          {/* Theme cycle icon only on mobile */}
-          <button
-            onClick={() => {
-              const currentIndex = DASHBOARD_COLORS.findIndex(c => c.value === dashboardColor);
-              const nextIndex = (currentIndex + 1) % DASHBOARD_COLORS.length;
-              setDashboardColor(DASHBOARD_COLORS[nextIndex].value);
-            }}
-            className="p-3 md:px-4 md:py-2.5 bg-black/5 rounded-xl md:rounded-2xl border border-black/5 hover:bg-black/10 transition-all group/palette flex items-center gap-2"
-            title="Cycle Dashboard Theme"
-          >
-            <div 
-              className="w-4 h-4 md:w-5 md:h-5 rounded-full border-2 border-white shadow-sm transition-transform group-hover/palette:rotate-180 duration-500"
-              style={{ backgroundColor: dashboardColor }}
-            />
-            <div className="hidden md:flex flex-col items-start leading-none text-left">
-              <span className={`text-[9px] font-black uppercase tracking-widest ${dashboardColor === '#1a1c1e' ? 'text-white/40' : 'text-slate-400'}`}>Theme</span>
-              <span className={`text-[11px] font-bold ${dashboardColor === '#1a1c1e' ? 'text-white' : 'text-slate-700'}`}>
-                {DASHBOARD_COLORS.find(c => c.value === dashboardColor)?.name || 'Custom'}
-              </span>
-            </div>
-            <Palette size={16} className={`hidden md:block ${dashboardColor === '#1a1c1e' ? 'text-indigo-400' : 'text-indigo-600'}`} />
-          </button>
-
-          <div className="hidden md:block h-4 w-px bg-black/10 mx-1" />
-
-          <div className="relative" data-notification-control>
-            <button
-              type="button"
-              onClick={() => {
-                if (notificationPermission === 'granted') {
-                  notifyLatestNote();
-                } else {
-                  setShowNotificationMenu(prev => !prev);
-                }
-              }}
-              className="relative flex h-10 w-10 md:h-11 md:w-11 items-center justify-center rounded-full border border-black/10 bg-white/80 text-slate-500 shadow-sm backdrop-blur transition-all hover:-translate-y-0.5 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-600 hover:shadow-md active:translate-y-0"
-              title={notificationPermission === 'granted' ? 'Show latest note summary' : 'Enable note notifications'}
-              aria-label={notificationPermission === 'granted' ? 'Show latest note summary' : 'Enable note notifications'}
-            >
-              {notificationPermission === 'granted' ? <Bell size={19} strokeWidth={2.2} /> : <BellOff size={19} strokeWidth={2.2} />}
-              {notificationPermission !== 'granted' && notificationPermission !== 'unsupported' && (
-                <span className="absolute right-0.5 top-0.5 h-2.5 w-2.5 rounded-full border-2 border-white bg-indigo-600" aria-hidden="true" />
-              )}
-            </button>
-
-            {showNotificationMenu && (
-              <div className="absolute right-0 top-[calc(100%+10px)] z-[1000] w-[min(20rem,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-black/10 bg-white shadow-2xl">
-                <div className="h-1 bg-indigo-600" />
-                <div className="p-4">
-                  <div className="flex items-start gap-3">
-                    <div className="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
-                      <Bell size={17} />
-                    </div>
-                    <div>
-                      <p className="text-sm font-black text-slate-800">Latest Note Notifications</p>
-                      <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                        Get a short summary of your latest note as a browser notification.
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={requestNoteNotifications}
-                    className="mt-4 w-full px-4 py-2.5 rounded-xl bg-indigo-600 text-white text-[11px] font-black uppercase tracking-widest hover:bg-indigo-700 transition-colors"
-                  >
-                    {notificationPermission === 'denied' ? 'Allow in Browser Settings' : 'Enable Notifications'}
-                  </button>
-                  {notificationPermission === 'granted' && (
-                    <button
-                      type="button"
-                      onClick={notifyLatestNote}
-                      className="mt-2 w-full px-4 py-2.5 rounded-xl bg-slate-100 text-slate-700 text-[11px] font-black uppercase tracking-widest hover:bg-slate-200 transition-colors"
-                    >
-                      Summarise Last Note
-                    </button>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {canInstallApp && (
-            <button
-              onClick={installApp}
-              className="p-2 md:px-4 md:py-2.5 bg-teal-600 text-white rounded-xl md:rounded-2xl hover:bg-teal-700 transition-all shadow-sm flex items-center gap-2"
-              title="Install Vocal Note"
-              aria-label="Install Vocal Note"
-            >
-              <Download size={18} />
-              <span className="hidden md:inline text-[10px] font-black uppercase tracking-widest">Install</span>
-            </button>
-          )}
-
-          {/* Storage Buttons - Hide on very small screens or group */}
-          <div className="hidden sm:flex items-center gap-1">
-            <button
-              onClick={importData}
-              className="p-2 md:p-3 rounded-xl md:rounded-2xl transition-all hover:bg-black/5 text-slate-400 hover:text-slate-600"
-              title="Restore Storage"
-            >
-              <Upload size={18} />
-            </button>
-            <button
-              onClick={exportData}
-              className="p-2 md:p-3 rounded-xl md:rounded-2xl transition-all hover:bg-black/5 text-slate-400 hover:text-slate-600"
-              title="Backup Storage"
-            >
-              <Download size={18} />
-            </button>
-          </div>
-          
-          <button
-            onClick={() => setIsTemplatesModalOpen(true)}
-            className="p-2 md:p-3 rounded-xl md:rounded-2xl transition-all hover:bg-black/5 text-slate-400 hover:text-slate-600"
-            title="Note Templates"
-          >
-            <Type size={20} />
-          </button>
-          
-          <button
-            onClick={() => addNote()}
-            className="group/btn px-3 md:px-8 py-2 md:py-3 bg-indigo-600 text-white rounded-xl md:rounded-[20px] text-xs md:text-sm font-black flex items-center gap-2 transition-all hover:scale-105 hover:bg-indigo-700 active:scale-95 shadow-lg relative overflow-hidden shrink-0"
-          >
-            <div className="absolute inset-0 bg-white/10 opacity-0 group-hover/btn:opacity-100 transition-opacity" />
-            <Plus size={18} />
-            <span className="hidden md:inline">NEW NOTE</span>
-            <span className="md:hidden">ADD</span>
-          </button>
-        </div>
-        {(!isOnline || updateAvailable) && (
-          <div className="absolute top-full left-0 right-0 flex justify-center pointer-events-none px-4 pt-2">
-            {!isOnline ? (
-              <div className="pointer-events-auto px-4 py-2 rounded-full bg-amber-100 text-amber-800 border border-amber-200 shadow-sm text-[11px] font-bold">
-                Offline mode — your notes are saved on this device.
-              </div>
-            ) : (
-              <button
-                onClick={() => { activatePWAUpdate(); setUpdateAvailable(false); }}
-                className="pointer-events-auto px-4 py-2 rounded-full bg-indigo-600 text-white shadow-lg text-[11px] font-black hover:bg-indigo-700 transition-colors"
-              >
-                New version available — Update
-              </button>
-            )}
-          </div>
-        )}
-      </header>
-
-
-      <AnimatePresence>
-        {showIosInstallHelp && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[200] bg-black/30 backdrop-blur-sm flex items-center justify-center p-4"
-            onClick={() => setShowIosInstallHelp(false)}
-          >
-            <motion.div
-              initial={{ opacity: 0, y: 16, scale: 0.98 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 16, scale: 0.98 }}
-              onClick={(e) => e.stopPropagation()}
-              className="w-full max-w-sm bg-white rounded-3xl shadow-2xl border border-black/10 p-6 text-slate-700"
-            >
-              <div className="flex items-center justify-between mb-5">
-                <div>
-                  <h2 className="text-lg font-black">Install Vocal Note</h2>
-                  <p className="text-xs text-slate-400 mt-1">Add it to your iPhone/iPad Home Screen.</p>
-                </div>
-                <button onClick={() => setShowIosInstallHelp(false)} className="p-2 rounded-full hover:bg-black/5" aria-label="Close">
-                  <X size={18} />
-                </button>
-              </div>
-              <ol className="space-y-3 text-sm font-medium">
-                <li><span className="font-black">1.</span> Open Vocal Note in Safari.</li>
-                <li><span className="font-black">2.</span> Tap the <strong>Share</strong> button.</li>
-                <li><span className="font-black">3.</span> Choose <strong>Add to Home Screen</strong>.</li>
-                <li><span className="font-black">4.</span> Tap <strong>Add</strong> to finish.</li>
-              </ol>
-              <button
-                onClick={() => setShowIosInstallHelp(false)}
-                className="mt-6 w-full py-3 bg-indigo-600 text-white rounded-2xl font-black text-sm"
-              >
-                Done
-              </button>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      <main className={`mx-auto pt-[100px] md:pt-[140px] pb-12 relative z-10 ${viewMode === 'grid' ? 'max-w-[1600px] px-4 md:px-8' : 'w-full min-h-[2000px]'}`} data-note-dashboard>
-
-        {notes.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 md:py-32 text-slate-400">
-            <div className="p-6 md:p-8 rounded-full bg-white shadow-inner mb-6 border border-black/5">
-               <Plus className="opacity-20 md:w-12 md:h-12" size={32} />
-            </div>
-            <p className="text-lg md:text-xl font-semibold opacity-30 italic text-center px-4">Start your vocal collection...</p>
-          </div>
-        ) : (
-          <div className={viewMode === 'grid' ? "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6 md:gap-12" : "relative w-full h-full"}>
-            <AnimatePresence mode="popLayout">
-              {notes.map((note) => (
-                <motion.div
-                  key={note.id}
-                  layout={viewMode === 'grid'}
-                  drag={viewMode === 'board'}
-                  dragMomentum={false}
-                  onDragEnd={(_, info) => {
-                    if (viewMode === 'board') {
-                      updateNotePosition(note.id, note.x + info.offset.x, note.y + info.offset.y);
-                    }
-                  }}
-                  initial={{ opacity: 0, scale: 0.9, y: 20 }}
-                  animate={{ 
-                    opacity: 1, 
-                    scale: 1, 
-                    x: viewMode === 'board' ? note.x : 0,
-                    y: viewMode === 'board' ? note.y : 0,
-                    rotate: note.rotation 
-                  }}
-                  exit={{ opacity: 0, scale: 0.8 }}
-                  whileHover={{ scale: 1.02, zIndex: 10, y: viewMode === 'grid' ? -8 : (note.y - 8), transition: { duration: 0.2 } }}
-                  whileDrag={{ scale: 1.1, zIndex: 100, boxShadow: "0 40px 80px rgba(0,0,0,0.2)" }}
-                  onClick={() => startEditing(note)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      startEditing(note);
-                    }
-                  }}
-                  tabIndex={0}
-                  role="button"
-                  aria-label="Open note"
-                  style={viewMode === 'board' ? { position: 'absolute', top: 0, left: 0 } : {}}
-                  className={`
-                    relative min-h-[300px] md:min-h-[380px] p-6 md:p-[30px] flex flex-col items-start
-                    note-shadow hover:note-shadow-hover paper-texture
-                    border border-black/5
-                    transition-all duration-500 note-corner-fold group
-                    ${viewMode === 'board' ? 'w-[280px] md:w-[320px] cursor-grab active:cursor-grabbing' : 'w-full cursor-pointer'}
-                    ${note.color}
-                    ${note.pattern && note.pattern !== 'none' ? note.pattern : ''}
-                    ${note.completed ? 'opacity-80' : ''}
-                  `}
-                >
-                  {/* Washi Tape Effect - Multi-colored */}
-                  <div className={`absolute -top-4 left-1/2 -translate-x-1/2 w-24 h-8 bg-white/20 backdrop-blur-3xl border border-white/10 rotate-[-2deg] shadow-lg z-20 pointer-events-none opacity-80 group-hover:opacity-100 transition-opacity bg-gradient-to-r ${
-                    note.color === 'bg-note-red' ? 'from-red-400/30 to-red-600/30' :
-                    note.color === 'bg-note-orange' ? 'from-orange-400/30 to-orange-600/30' :
-                    note.color === 'bg-note-yellow' ? 'from-yellow-400/30 to-yellow-600/30' :
-                    note.color === 'bg-note-green' ? 'from-green-400/30 to-green-600/30' :
-                    note.color === 'bg-note-blue' ? 'from-blue-400/30 to-blue-600/30' :
-                    note.color === 'bg-note-indigo' ? 'from-indigo-400/30 to-indigo-600/30' :
-                    'from-purple-400/30 to-purple-600/30'
-                  }`} />
-                  
-                  <div className="note-header w-full flex justify-between items-center text-[11px] uppercase tracking-[2.5px] font-black opacity-30 mb-[25px] pointer-events-none">
-                    <div className="flex items-center gap-1">
-                       <div className="w-2 h-2 rounded-full bg-white/50" />
-                       <span>{new Date().toLocaleDateString('en-US', { month: 'short', day: '2-digit' })}</span>
-                    </div>
-                    {note.completed && <span className="bg-black/10 px-2 py-0.5 rounded italic lowercase tracking-normal">Done</span>}
-                  </div>
-
-                  {note.image && (
-                    <div className="relative w-full mb-4 pointer-events-none">
-                      <img 
-                        src={note.image} 
-                        alt="Attached photo" 
-                        className="w-full aspect-video object-cover rounded-xl shadow-md border border-black/5" 
-                        referrerPolicy="no-referrer"
-                      />
-                    </div>
-                  )}
-
-                  <div className="w-full h-full flex flex-col relative pointer-events-none">
-                    {/* Drawing Layer Preview */}
-                    {(note.drawingLines && note.drawingLines.length > 0) && (
-                      <div className="absolute inset-0 z-0">
-                        <Stage width={300} height={400} className="w-full h-full">
-                          <Layer>
-                            {note.drawingLines.map((line, i) => (
-                              <KonvaLine
-                                key={i}
-                                points={line.points}
-                                stroke={line.color}
-                                strokeWidth={line.strokeWidth}
-                                tension={0.5}
-                                lineCap="round"
-                                lineJoin="round"
-                                globalCompositeOperation={
-                                  line.tool === 'eraser' ? 'destination-out' : 'source-over'
-                                }
-                              />
-                            ))}
-                          </Layer>
-                        </Stage>
-                      </div>
-                    )}
-
-                    <div 
-                      className={`flex-1 w-full overflow-hidden leading-[1.4] text-[#222] whitespace-pre-wrap relative z-10 note-content ${note.completed ? 'line-through opacity-40' : ''}`}
-                      style={{ 
-                        fontSize: `${Math.min(24, (note.fontSize || 48) / 2.5)}px`
-                      }}
-                      dangerouslySetInnerHTML={{ __html: note.content || (!note.image && !note.drawingLines?.length ? '<span class="opacity-20 italic">Empty note...</span>' : '') }}
-                    />
-                    
-                    <div className="flex items-center justify-end gap-3 pt-4 opacity-40 group-hover:opacity-100 transition-all transform translate-y-0 relative pointer-events-auto">
-                      <button
-                        onClick={(e) => changeColor(note.id, e)}
-                        className="p-2.5 rounded-xl bg-white/20 hover:bg-white text-purple-600 transition-colors border border-black/10"
-                        title="Warp Spectrum"
-                      >
-                        <Palette size={18} />
-                      </button>
-                      <button
-                        onClick={(e) => deleteNote(note.id, e)}
-                        className="p-2.5 rounded-xl bg-white/20 hover:bg-red-500 hover:text-white text-red-500 transition-colors border border-black/10"
-                        title="Delete"
-                      >
-                        <Trash2 size={18} />
-                      </button>
-                    </div>
-                  </div>
-                </motion.div>
-              ))}
-            </AnimatePresence>
-          </div>
-        )}
-      </main>
-
-      {/* Full Screen Editor Overlay */}
-      <AnimatePresence>
-        {activeNoteId && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[200] bg-white flex flex-col"
-          >
-            {/* Editor Header */}
-            <header className="px-4 md:px-8 py-4 md:py-6 flex items-center justify-between border-b border-black/5 bg-white/50 backdrop-blur-xl">
-              <div className="flex items-center gap-2 md:gap-4">
-                <button 
-                  onClick={saveNote}
-                  className="p-2 hover:bg-black/5 rounded-full transition-colors text-slate-600"
-                  title="Back"
-                >
-                  <ArrowLeft size={20} className="md:w-6 md:h-6" />
-                </button>
-                <div className={`px-3 md:px-4 py-1 md:py-1.5 rounded-full text-[8px] md:text-[10px] font-black uppercase tracking-[0.2em] ${notes.find(n => n.id === activeNoteId)?.color} bg-opacity-40 border border-black/5 shadow-sm`}>
-                  <span className="hidden xs:inline">{isDrawing ? 'Sketching Mode' : 'Writing Mode'}</span>
-                  <span className="xs:hidden">{isDrawing ? 'Sketch' : 'Write'}</span>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-1 md:gap-2">
-                {/* Single Pencil Mode Switcher */}
-                <button
-                  onClick={() => setIsDrawing(!isDrawing)}
-                  className={`p-2 md:p-3 rounded-xl md:rounded-2xl transition-all ${isDrawing ? 'bg-purple-600 text-white shadow-md' : 'bg-transparent text-slate-500 hover:text-black hover:bg-black/5'}`}
-                  title={isDrawing ? "Writing Mode" : "Drawing Mode"}
-                >
-                  <Pencil size={20} className="md:w-[22px] md:h-[22px]" />
-                </button>
-
-                <AnimatePresence>
-                  {isDrawing && (
-                    <motion.div
-                      initial={{ opacity: 0, scale: 0.95 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      exit={{ opacity: 0, scale: 0.95 }}
-                      className="fixed md:relative bottom-24 md:bottom-auto left-4 right-4 md:left-auto md:right-auto flex items-center justify-center gap-1 bg-white/80 md:bg-slate-50 backdrop-blur-md md:backdrop-blur-none p-2 rounded-[22px] border border-black/10 md:border-black/5 shadow-2xl md:shadow-none z-50 md:z-auto"
-                    >
-                      <button
-                        onClick={() => setDrawTool('pen')}
-                        className={`p-2.5 rounded-xl transition-all ${drawTool === 'pen' ? 'bg-black text-white' : 'hover:bg-black/5 text-slate-500'}`}
-                        title="Pen"
-                      >
-                        <Pencil size={18} />
-                      </button>
-                      <button
-                        onClick={() => setDrawTool('eraser')}
-                        className={`p-2.5 rounded-xl transition-all ${drawTool === 'eraser' ? 'bg-black text-white' : 'hover:bg-black/5 text-slate-500'}`}
-                        title="Eraser"
-                      >
-                        <Eraser size={18} />
-                      </button>
-                      <button
-                        onClick={() => setDrawTool('pan')}
-                        className={`p-2.5 rounded-xl transition-all ${drawTool === 'pan' ? 'bg-black text-white' : 'hover:bg-black/5 text-slate-500'}`}
-                        title="Pan Tool"
-                      >
-                        <Hand size={18} />
-                      </button>
-                      <button
-                        onClick={() => { setStageScale(1); setStagePos({ x: 0, y: 0 }); }}
-                        className="hidden md:block p-2.5 rounded-xl hover:bg-black/5 text-slate-400 transition-all"
-                        title="Reset View"
-                      >
-                        <Maximize size={18} />
-                      </button>
-                      <div className="w-px h-6 bg-black/10 mx-1" />
-                      <div className="flex items-center gap-1 md:gap-1.5 px-0.5 max-w-[120px] overflow-x-auto">
-                        {['#000000', '#ef4444', '#3b82f6', '#10b981', '#f59e0b'].map(c => (
-                          <button
-                            key={c}
-                            onClick={() => { setDrawColor(c); setDrawTool('pen'); }}
-                            className={`w-5 h-5 md:w-6 md:h-6 shrink-0 rounded-full border border-black/10 transition-all hover:scale-110 ${drawColor === c && drawTool === 'pen' ? 'ring-2 ring-black ring-offset-2' : ''}`}
-                            style={{ backgroundColor: c }}
-                          />
-                        ))}
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-
-                <div className="hidden md:block w-px h-8 bg-black/5 mx-1" />
-
-                {/* Direct Action Tools */}
-                <div className="hidden md:flex items-center gap-1">
-                  <button
-                    onClick={(e) => triggerGallery(activeNoteId, e)}
-                    className="p-3 rounded-2xl hover:bg-slate-50 text-slate-400 hover:text-blue-500 transition-all"
-                    title="Gallery"
-                  >
-                    <ImageIcon size={22} />
-                  </button>
-
-                  <button
-                    onClick={(e) => startVoiceRecording('note', e)}
-                    className={`p-3 rounded-2xl transition-all ${
-                      isRecording 
-                        ? 'bg-red-500 text-white animate-pulse' 
-                        : micPermissionStatus === 'denied'
-                          ? 'hover:bg-red-50 text-red-300'
-                          : 'hover:bg-slate-50 text-slate-400 hover:text-red-500'
-                    }`}
-                    title={micPermissionStatus === 'denied' ? "Mic Blocked" : "Voice to Note"}
-                  >
-                    {micPermissionStatus === 'denied' ? <MicOff size={22} /> : <Mic size={22} />}
-                  </button>
-                </div>
-
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setIsChatOpen(!isChatOpen);
-                  }}
-                  className={`p-2 md:p-3 rounded-xl md:rounded-2xl transition-all ${isChatOpen ? 'bg-blue-600 text-white shadow-md' : 'hover:bg-blue-50 text-slate-400 hover:text-blue-600'}`}
-                  title="AI Sidebar Chat"
-                >
-                  <MessageCircle size={20} className="md:w-[22px] md:h-[22px]" />
-                </button>
-
-                {/* Overflow Menu for smaller screens */}
-                <div className="md:hidden relative">
-                   <button
-                    onClick={() => setIsEditorMenuOpen(!isEditorMenuOpen)}
-                    className="p-2 rounded-xl bg-black/5 hover:bg-black/10 transition-all"
-                  >
-                    <MoreVertical size={20} />
-                  </button>
-                  <AnimatePresence>
-                    {isEditorMenuOpen && (
-                      <motion.div
-                        initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                        animate={{ opacity: 1, y: 0, scale: 1 }}
-                        exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                        className="absolute top-full right-0 mt-2 w-48 bg-white border border-black/10 rounded-2xl shadow-2xl z-[300] p-2 overflow-hidden flex flex-col gap-1"
-                      >
-                         <button
-                          onClick={(e) => { triggerGallery(activeNoteId, e); setIsEditorMenuOpen(false); }}
-                          className="flex items-center gap-3 p-3 rounded-xl hover:bg-black/5 text-slate-600 font-bold text-xs"
-                        >
-                          <ImageIcon size={18} />
-                          <span>Gallery</span>
-                        </button>
-                        <button
-                          onClick={(e) => { startVoiceRecording('note', e); setIsEditorMenuOpen(false); }}
-                          className="flex items-center gap-3 p-3 rounded-xl hover:bg-black/5 text-slate-600 font-bold text-xs"
-                        >
-                          <Mic size={18} />
-                          <span>Voice Input</span>
-                        </button>
-                         <button
-                          onClick={(e) => { changeColor(activeNoteId!, e); setIsEditorMenuOpen(false); }}
-                          className="flex items-center gap-3 p-3 rounded-xl hover:bg-black/5 text-slate-600 font-bold text-xs"
-                        >
-                          <Palette size={18} />
-                          <span>Theme Note</span>
-                        </button>
-                        <button
-                          onClick={(e) => { deleteNote(activeNoteId!, e); setIsEditorMenuOpen(false); }}
-                          className="flex items-center gap-3 p-3 rounded-xl hover:bg-red-50 text-red-500 font-bold text-xs"
-                        >
-                          <Trash2 size={18} />
-                          <span>Delete</span>
-                        </button>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
-
-                <div className="hidden lg:flex items-center gap-1 bg-black/5 p-1 rounded-[22px] ml-1">
-                  <button
-                    onClick={() => setEditFontSize(prev => Math.max(12, prev - 4))}
-                    className="p-2.5 rounded-xl hover:bg-white text-slate-500 hover:text-black transition-all"
-                    title="Smaller"
-                  >
-                    <Minus size={18} />
-                  </button>
-                  <div className="px-2 text-[10px] font-bold text-slate-400 w-8 text-center">{editFontSize}</div>
-                  <button
-                    onClick={() => setEditFontSize(prev => Math.min(120, prev + 4))}
-                    className="p-2.5 rounded-xl hover:bg-white text-slate-500 hover:text-black transition-all"
-                    title="Larger"
-                  >
-                    <Plus size={18} />
-                  </button>
-                </div>
-
-                <div className="hidden md:flex items-center gap-1">
-                  <button
-                    onClick={() => applyFormat('bold')}
-                    className={`p-3 rounded-2xl transition-all ml-1 ${isBold ? 'bg-black text-white shadow-md' : 'hover:bg-slate-50 text-slate-400 hover:text-black'}`}
-                    title="Bold"
-                  >
-                    <Bold size={22} />
-                  </button>
-
-                  <button
-                    onClick={() => applyFormat('underline')}
-                    className={`p-3 rounded-2xl transition-all ${isUnderline ? 'bg-black text-white shadow-md' : 'hover:bg-slate-50 text-slate-400 hover:text-black'}`}
-                    title="Underline"
-                  >
-                    <Underline size={22} />
-                  </button>
-                </div>
-
-                <div className="hidden md:block w-px h-8 bg-black/5 mx-1" />
-
-                <button
-                  onClick={saveNote}
-                  className="p-2 md:p-3 bg-black text-white rounded-xl md:rounded-2xl hover:bg-slate-800 transition-all shadow-lg ml-1 md:ml-2"
-                  title="Save & Close"
-                >
-                  <CheckCircle2 size={20} className="md:w-[22px] md:h-[22px]" />
-                </button>
-              </div>
-            </header>
-
-
-            {/* Hybrid Note Editor Body & Sidebar AI */}
-            <div className="flex-1 flex overflow-hidden">
-              <div className={`flex-1 relative overflow-hidden flex flex-col transition-all duration-500 ${notes.find(n => n.id === activeNoteId)?.color}`}>
-                <div className="flex-1 w-full max-w-5xl mx-auto p-6 md:p-12 lg:p-24 relative flex flex-col">
-                  
-                  {/* Photo Layer */}
-                  {notes.find(n => n.id === activeNoteId)?.image && (
-                    <div className="relative mb-8 group shrink-0 z-10 w-full max-w-2xl mx-auto">
-                      <img 
-                        src={notes.find(n => n.id === activeNoteId)?.image} 
-                        className="w-full max-h-[30vh] object-contain rounded-2xl shadow-xl transition-all"
-                        referrerPolicy="no-referrer"
-                      />
-                      <button 
-                        onClick={() => removeImage(activeNoteId)}
-                        className="absolute top-4 right-4 p-2 bg-black/50 text-white rounded-full hover:bg-black transition-colors"
-                      >
-                        <X size={20} />
-                      </button>
-                    </div>
-                  )}
-
-                  {/* Text Layer (Rich Text) */}
-                  <div
-                    ref={editorRef}
-                    contentEditable
-                    suppressContentEditableWarning
-                    onKeyDown={handleEditorKeyDown}
-                    onMouseDown={() => {
-                      keepUnderlineActiveRef.current = false;
-                    }}
-                    onPaste={() => {
-                      setTimeout(() => {
-                        if (editorRef.current) {
-                          const selOffsets = getSelectionOffsets(editorRef.current);
-                          normalizeEditorUnderlines(editorRef.current);
-                          if (selOffsets) {
-                            setSelectionOffsets(editorRef.current, selOffsets.start, selOffsets.end);
-                          }
-                          setEditContent(editorRef.current.innerHTML);
-                          checkSelection();
-                        }
-                      }, 0);
-                    }}
-                    onInput={(e) => {
-                      const target = e.currentTarget;
-                      const text = target.innerText;
-                      if (text.length > MAX_CHARS) {
-                        target.innerText = text.slice(0, MAX_CHARS);
-                        const range = document.createRange();
-                        const sel = window.getSelection();
-                        range.selectNodeContents(target);
-                        range.collapse(false);
-                        sel?.removeAllRanges();
-                        sel?.addRange(range);
-                      }
-                      const selOffsets = getSelectionOffsets(target);
-                      const changed = normalizeEditorUnderlines(target);
-                      if (changed && selOffsets) {
-                        setSelectionOffsets(target, selOffsets.start, selOffsets.end);
-                      }
-                      const html = target.innerHTML;
-                      setEditContent(html);
-                      // Persist the active draft immediately through the notes state.
-                      // This prevents data loss if the app is closed before Save & Close.
-                      if (activeNoteId) {
-                        setNotes(prev => prev.map(n =>
-                          n.id === activeNoteId
-                            ? { ...n, content: html, fontSize: editFontSize }
-                            : n
-                        ));
-                      }
-                      checkSelection();
-                    }}
-                    onSelect={checkSelection}
-                    onKeyUp={checkSelection}
-                    onMouseUp={checkSelection}
-                    onFocus={checkSelection}
-                    style={{ 
-                      fontSize: `${editFontSize}px`,
-                      fontWeight: 500
-                    }}
-                    className={`flex-1 w-full bg-transparent focus:outline-none leading-[1.3] text-[#333] note-content z-10 relative overflow-y-auto whitespace-pre-wrap ${isDrawing ? 'pointer-events-none' : 'pointer-events-auto'}`}
-                  />
-                  
-                  {/* Character Count */}
-                  <div className="absolute bottom-10 right-10 z-30 flex items-center gap-2 px-4 py-2 bg-black text-white rounded-full text-[9px] font-black tracking-[0.2em] shadow-xl pointer-events-none opacity-40 group-hover:opacity-100 transition-opacity">
-                    <span>{editContent.replace(/<[^>]*>/g, '').length}</span>
-                    <div className="w-px h-2 bg-white/20" />
-                    <span>{MAX_CHARS}</span>
-                  </div>
-                  {(editContent === '' || editContent === '<br>') && (
-                    <div className="absolute top-0 left-0 text-slate-300 pointer-events-none italic opacity-50" style={{ fontSize: `${editFontSize}px` }}>
-                      Type your thoughts...
-                    </div>
-                  )}
-
-                  {/* Drawing Layer Overlay */}
-                  <div 
-                    ref={canvasContainerRef} 
-                    className={`absolute inset-0 z-20 ${isDrawing ? 'pointer-events-auto cursor-crosshair' : 'pointer-events-none'}`}
-                  >
-                    <Stage
-                      width={canvasSize.width}
-                      height={canvasSize.height}
-                      scaleX={stageScale}
-                      scaleY={stageScale}
-                      x={stagePos.x}
-                      y={stagePos.y}
-                      draggable={!isDrawing || drawTool === 'pan'}
-                      onDragEnd={(e) => {
-                        setStagePos({ x: e.target.x(), y: e.target.y() });
-                      }}
-                      onMouseDown={handleMouseDown}
-                      onMouseMove={handleMouseMove}
-                      onMouseUp={handleMouseUp}
-                      onTouchStart={handleMouseDown}
-                      onTouchMove={(e) => {
-                        if (e.evt.touches.length > 1) {
-                          handleTouchMove(e);
-                        } else {
-                          handleMouseMove(e);
-                        }
-                      }}
-                      onTouchEnd={() => {
-                        handleTouchEnd();
-                        handleMouseUp();
-                      }}
-                      onWheel={handleWheel}
-                    >
-                      <Layer>
-                        {(notes.find(n => n.id === activeNoteId)?.drawingLines || []).map((line, i) => (
-                          <KonvaLine
-                            key={i}
-                            points={line.points}
-                            stroke={line.color}
-                            strokeWidth={line.strokeWidth}
-                            tension={0.5}
-                            lineCap="round"
-                            lineJoin="round"
-                            globalCompositeOperation={
-                              line.tool === 'eraser' ? 'destination-out' : 'source-over'
-                            }
-                          />
-                        ))}
-                      </Layer>
-                    </Stage>
-                  </div>
-                </div>
-              </div>
-
-              {/* Sidebar Chat Box */}
-              <AnimatePresence>
-                {isChatOpen && activeNoteId && (
-                  <motion.div
-                    initial={{ x: '100%', opacity: 0 }}
-                    animate={{ x: 0, opacity: 1 }}
-                    exit={{ x: '100%', opacity: 0 }}
-                    className="fixed md:relative inset-0 md:inset-auto md:w-[400px] bg-slate-950 border-l border-white/5 flex flex-col shadow-[-20px_0_60px_rgba(0,0,0,0.4)] z-[201]"
-                  >
-                    <div className="p-6 md:p-8 bg-slate-900 text-white flex items-center justify-between border-b border-white/5">
-                      <div className="flex items-center gap-3">
-                        <div className="bg-indigo-600 p-2 rounded-xl shadow-lg">
-                          <Sparkles size={18} className="text-white" />
-                        </div>
-                        <div className="flex flex-col">
-                          <span className="font-bold tracking-tight text-sm">Vocal AI</span>
-                          <span className="text-[10px] text-white/40 uppercase tracking-widest font-black leading-none mt-0.5">Assistant Engine</span>
-                        </div>
-                      </div>
-                      <button onClick={() => setIsChatOpen(false)} className="p-2 hover:bg-white/10 rounded-full transition-colors text-white/40 hover:text-white">
-                        <X size={20} />
-                      </button>
-                    </div>
-
-                    <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6 relative bg-slate-950">
-                      {messages.map((msg, i) => (
-                        <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                          <div className={`max-w-[90%] md:max-w-[85%] px-4 md:px-5 py-3 md:py-3.5 rounded-2xl text-[14px] font-medium leading-relaxed shadow-sm ${
-                            msg.role === 'user' 
-                              ? 'bg-indigo-600 text-white rounded-tr-none' 
-                              : 'bg-white/5 text-slate-100 backdrop-blur-md border border-white/5 rounded-tl-none'
-                          }`}>
-                            <div>{msg.content}</div>
-                            {msg.role === 'assistant' && i !== 0 && (
-                              <button 
-                                onClick={() => insertChatSuggestion(msg.content)}
-                                className="mt-4 flex items-center gap-2 px-3 py-2 bg-indigo-600/30 hover:bg-indigo-600/50 border border-indigo-500/30 rounded-xl text-[10px] font-black uppercase tracking-widest text-indigo-300 transition-all active:scale-95 group/insert"
-                              >
-                                <Plus size={12} className="group-hover/insert:rotate-90 transition-transform" />
-                                <span>Apply to Note</span>
-                                <div className="w-2 h-2 rounded-full ml-1" style={{ backgroundColor: drawColor }} title={`Color: ${drawColor}`} />
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                      {isLoading && (
-                        <div className="flex justify-start">
-                          <div className="bg-white/5 border border-white/5 p-4 rounded-2xl rounded-tl-none shadow-sm">
-                            <Loader2 className="animate-spin text-white/20" size={20} />
-                          </div>
-                        </div>
-                      )}
-                      
-                      {/* Voice Recording HUD */}
-                      {isRecording && (
-                        <motion.div 
-                          initial={{ opacity: 0, scale: 0.95 }}
-                          animate={{ opacity: 1, scale: 1 }}
-                          className="absolute inset-x-4 md:inset-x-6 bottom-4 md:bottom-6 bg-slate-900/95 backdrop-blur-2xl border border-white/10 p-6 md:p-8 rounded-[24px] md:rounded-[32px] z-50 flex flex-col items-center justify-center text-white shadow-2xl"
-                        >
-                          <div className="bg-indigo-600 p-4 md:p-6 rounded-full mb-4 animate-pulse shadow-[0_0_30px_rgba(79,70,229,0.3)]">
-                            <Mic size={24} className="md:w-8 md:h-8 text-white" />
-                          </div>
-                          <span className="tracking-[0.3em] uppercase text-[9px] md:text-[10px] font-black text-white/40 mb-6">Engine Listening...</span>
-                          <button 
-                            onClick={() => recognitionRef.current?.stop()}
-                            className="w-full px-8 py-3 bg-white text-slate-950 rounded-xl md:rounded-2xl text-[10px] md:text-[11px] font-black uppercase tracking-widest hover:bg-slate-100 transition-all shadow-lg active:scale-95"
-                          >
-                            Stop Engine
-                          </button>
-                        </motion.div>
-                      )}
-                      
-                      <div ref={chatEndRef} />
-                    </div>
-
-                    <div className="p-6 md:p-8 bg-slate-900 border-t border-white/5 flex flex-col gap-4">
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="text"
-                          value={chatInput}
-                          onChange={(e) => setChatInput(e.target.value.slice(0, MAX_CHARS))}
-                          onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
-                          placeholder={isRecording ? "Listening..." : "Message Vocal..."}
-                          disabled={isRecording}
-                          className="flex-1 bg-white/5 border border-white/5 rounded-xl md:rounded-2xl px-4 md:px-6 py-3 md:py-4 text-[14px] md:text-[15px] text-white placeholder:text-white/20 focus:ring-2 focus:ring-indigo-500/50 outline-none disabled:opacity-50 transition-all font-medium"
-                        />
-                        <button
-                          onClick={(e) => startVoiceRecording('chat', e)}
-                          disabled={isLoading}
-                          className={`p-3 md:p-4 rounded-xl md:rounded-2xl transition-all transform active:scale-95 ${
-                            isRecording 
-                              ? 'bg-red-500 text-white animate-pulse' 
-                              : micPermissionStatus === 'denied'
-                                ? 'bg-red-500/10 text-red-400'
-                                : 'bg-white/5 text-white/20 hover:text-white hover:bg-white/10'
-                          }`}
-                          title={micPermissionStatus === 'denied' ? "Mic Blocked" : "Voice Input"}
-                        >
-                          {micPermissionStatus === 'denied' ? <MicOff size={20} className="md:w-[22px] md:h-[22px]" /> : <Mic size={20} className="md:w-[22px] md:h-[22px]" />}
-                        </button>
-                      </div>
-                      <button
-                        onClick={handleSendMessage}
-                        disabled={isLoading || !chatInput.trim() || isRecording}
-                        className="w-full py-3 md:py-4 bg-white text-slate-950 rounded-xl md:rounded-2xl font-black uppercase tracking-widest text-[10px] md:text-[11px] disabled:opacity-10 disabled:cursor-not-allowed transform active:scale-[0.98] transition-all flex items-center justify-center gap-2 shadow-2xl hover:bg-slate-50"
-                      >
-                        <Send size={14} />
-                        <span>REPLY</span>
-                      </button>
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Automatic last-note summary shown when returning to the dashboard */}
-      <AnimatePresence>
-        {showLastNoteSummary && lastSummaryNoteId && (
-          <div className="fixed inset-0 z-[1200] flex items-center justify-center p-5 md:p-8">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowLastNoteSummary(false)}
-              className="absolute inset-0 bg-black/45 backdrop-blur-md"
-            />
-            <motion.div
-              initial={{ opacity: 0, y: 24, scale: 0.96 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 16, scale: 0.97 }}
-              className="relative w-full max-w-xl overflow-hidden rounded-[28px] bg-white shadow-2xl border border-black/5"
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="last-note-summary-title"
-            >
-              {(() => {
-                const summaryNote = notes.find(n => n.id === lastSummaryNoteId);
-                if (!summaryNote) return null;
-                return (
-                  <>
-                    <div className="px-6 md:px-8 pt-7 pb-5 border-b border-black/5">
-                      <div className="flex items-start justify-between gap-4">
-                        <div>
-                          <p className="text-[10px] font-black uppercase tracking-[0.25em] text-indigo-500 mb-2">Back on Dashboard</p>
-                          <h2 id="last-note-summary-title" className="text-xl md:text-2xl font-black tracking-tight text-slate-900">Last Note Summary</h2>
-                        </div>
-                        <button
-                          onClick={() => setShowLastNoteSummary(false)}
-                          className="p-2 rounded-full hover:bg-slate-100 transition-colors"
-                          aria-label="Close summary"
-                        >
-                          <X size={18} />
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="p-6 md:p-8">
-                      <div className={`rounded-2xl p-5 md:p-6 ${summaryNote.color} ${summaryNote.pattern && summaryNote.pattern !== 'none' ? summaryNote.pattern : ''}`}>
-                        <p className="text-[10px] font-black uppercase tracking-[0.2em] opacity-40 mb-3">Saved note</p>
-                        <div
-                          className="note-content text-base md:text-lg leading-relaxed text-slate-800"
-                          dangerouslySetInnerHTML={{ __html: getLastNoteSummary(summaryNote) }}
-                        />
-                      </div>
-                      <div className="mt-5 flex gap-3">
-                        <button
-                          onClick={() => setShowLastNoteSummary(false)}
-                          className="flex-1 py-3 rounded-xl bg-slate-900 text-white font-black text-[10px] uppercase tracking-widest hover:bg-slate-800 transition-colors"
-                        >
-                          Continue
-                        </button>
-                        <button
-                          onClick={() => {
-                            setShowLastNoteSummary(false);
-                            startEditing(summaryNote);
-                          }}
-                          className="flex-1 py-3 rounded-xl border border-black/10 bg-white text-slate-900 font-black text-[10px] uppercase tracking-widest hover:bg-slate-50 transition-colors"
-                        >
-                          Open Note
-                        </button>
-                      </div>
-                    </div>
-                  </>
-                );
-              })()}
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* Templates Modal */}
-      <AnimatePresence>
-        {isTemplatesModalOpen && (
-          <div className="fixed inset-0 z-[1000] flex items-center justify-center p-6">
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setIsTemplatesModalOpen(false)}
-              className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-            />
-            <motion.div
-              initial={{ opacity: 0, scale: 0.9, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.9, y: 20 }}
-              className="relative w-full max-w-4xl bg-white md:rounded-[40px] shadow-2xl overflow-hidden flex flex-col h-full md:max-h-[80vh]"
-            >
-              <div className="px-6 md:px-12 py-6 md:py-8 flex items-center justify-between border-b border-black/5 shrink-0">
-                <div>
-                  <h2 className="text-xl md:text-3xl font-black tracking-tight">Templates</h2>
-                  <p className="hidden md:block text-slate-400 font-medium">Quick start your thoughts</p>
-                </div>
-                <div className="flex items-center gap-2 md:gap-4">
-                  <button
-                    onClick={() => generateAIContent('template')}
-                    className="flex items-center gap-2 px-4 md:px-6 py-2.5 md:py-3 bg-indigo-600 text-white rounded-xl md:rounded-2xl hover:bg-indigo-700 transition-all shadow-md font-bold text-xs md:text-sm"
-                  >
-                    <Wand2 size={18} className="md:w-5 md:h-5" />
-                    <span>AI Generate</span>
-                  </button>
-                  <button 
-                    onClick={() => setIsTemplatesModalOpen(false)}
-                    className="p-2 md:p-3 hover:bg-slate-100 rounded-full transition-colors"
-                  >
-                    <X size={24} />
-                  </button>
-                </div>
-              </div>
-
-              <div className="p-6 md:p-12 overflow-y-auto">
-                {templates.length === 0 ? (
-                  <div className="py-20 text-center text-slate-300">
-                    <Sparkles className="mx-auto mb-4 opacity-20" size={64} />
-                    <p className="text-lg md:text-xl italic font-medium">No templates saved yet.</p>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 md:gap-6">
-                    {templates.map(template => (
-                      <div 
-                        key={template.id}
-                        onClick={() => applyTemplate(template)}
-                        className={`group relative p-8 rounded-3xl cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98] shadow-lg border border-black/5 ${template.color}`}
-                      >
-                        <div className="flex justify-between items-start mb-4">
-                          <h3 className="font-bold text-lg truncate pr-8">{template.name}</h3>
-                          <button 
-                            onClick={(e) => deleteTemplate(template.id, e)}
-                            className="opacity-0 group-hover:opacity-100 p-2 hover:bg-black/10 rounded-full transition-all"
-                          >
-                            <Trash2 size={16} className="text-black/60" />
-                          </button>
-                        </div>
-                        <p className="text-sm opacity-60 line-clamp-3 leading-relaxed note-content" dangerouslySetInnerHTML={{ __html: template.content || "Visual Template" }} />
-                        <div className="mt-6 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest bg-black/5 px-3 py-1 rounded-full w-fit">
-                          {template.drawingLines?.length ? 'Sketch' : template.image ? 'Media' : 'Text'}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* Full Screen Editor Overlay */}
-
-      <style>{`
-        .note-content b, .note-content strong { font-weight: 700; }
-        .note-content u { text-decoration: underline; }
-      `}</style>
-    </div>
-  );
-}
