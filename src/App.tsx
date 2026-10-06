@@ -393,6 +393,7 @@ export default function App() {
   const editorRef = useRef<HTMLDivElement>(null);
   const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
   const [activeNoteId, setActiveNoteId] = useState<string | null>(null);
+  const activeNoteIdRef = useRef<string | null>(null);
   const [showLastNoteSummary, setShowLastNoteSummary] = useState(false);
   const [lastSummaryNoteId, setLastSummaryNoteId] = useState<string | null>(null);
   const lastLeavingNoteIdRef = useRef<string | null>(null);
@@ -632,6 +633,10 @@ export default function App() {
   useEffect(() => {
     notesRef.current = notes;
   }, [notes]);
+  
+  useEffect(() => {
+    activeNoteIdRef.current = activeNoteId;
+  }, [activeNoteId]);
 
   // Persist the complete workspace after every change. IndexedDB keeps the
   // workspace available even when the browser is offline or localStorage is full.
@@ -699,7 +704,7 @@ export default function App() {
     };
 
     const closeEditor = (showSummary = true) => {
-      const leavingNoteId = lastLeavingNoteIdRef.current || activeNoteId;
+      const leavingNoteId = lastLeavingNoteIdRef.current || activeNoteIdRef.current;
       setActiveNoteId(null);
       setIsDrawing(false);
       setIsChatOpen(false);
@@ -746,7 +751,7 @@ export default function App() {
       window.removeEventListener('popstate', restoreEditorFromHistory);
       window.removeEventListener('hashchange', restoreEditorFromHistory);
     };
-  }, [offlineStorageReady, activeNoteId]);
+  }, [offlineStorageReady]);
 
   useEffect(() => {
     if (!offlineStorageReady || !activeNoteId) return;
