@@ -1,5 +1,5 @@
 const DB_NAME = 'vocal-note-offline';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_NAME = 'app';
 
 type Snapshot = {
@@ -9,6 +9,12 @@ type Snapshot = {
 };
 
 const canUseIndexedDB = () => typeof window !== 'undefined' && 'indexedDB' in window;
+
+function isValidSnapshot(value: unknown): value is Snapshot {
+  if (!value || typeof value !== 'object') return false;
+  const snapshot = value as Partial<Snapshot>;
+  return Array.isArray(snapshot.notes) && Array.isArray(snapshot.templates);
+}
 
 function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -70,44 +76,55 @@ async function writeValue<T>(key: string, value: T): Promise<void> {
   });
 }
 
-export async function loadOfflineSnapshot(): Promise<Snapshot | null> {
+function readLegacyStorage(): Snapshot | null {
   try {
-    const existing = await readValue<Snapshot>('snapshot');
-    if (existing) return existing;
+    const notesRaw = localStorage.getItem('stickie-notes-rainbow');
+    const templatesRaw = localStorage.getItem('stickie-templates-rainbow');
+    if (!notesRaw && !templatesRaw) return null;
 
-    // One-time migration from the previous localStorage implementation.
-    const notes = localStorage.getItem('stickie-notes-rainbow');
-    const templates = localStorage.getItem('stickie-templates-rainbow');
+    const notes = notesRaw ? JSON.parse(notesRaw) : [];
+    const templates = templatesRaw ? JSON.parse(templatesRaw) : [];
+    if (!Array.isArray(notes) || !Array.isArray(templates)) return null;
 
-    if (!notes && !templates) return null;
-
-    const snapshot: Snapshot = {
-      notes: notes ? JSON.parse(notes) : [],
-      templates: templates ? JSON.parse(templates) : [],
-      savedAt: Date.now(),
-    };
-
-    await writeValue('snapshot', snapshot);
-    return snapshot;
+    return { notes, templates, savedAt: Date.now() };
   } catch (error) {
-    console.warn('Offline storage read failed; localStorage fallback will be used.', error);
+    console.warn('Legacy localStorage migration data is invalid.', error);
     return null;
   }
 }
 
-export async function saveOfflineSnapshot(notes: unknown[], templates: unknown[]): Promise<void> {
+export async function loadOfflineSnapshot(): Promise<Snapshot | null> {
   try {
-    await writeValue('snapshot', {
-      notes,
-      templates,
-      savedAt: Date.now(),
-    });
+    const existing = await readValue<Snapshot>('snapshot');
+    if (isValidSnapshot(existing)) return existing;
+
+    const migrated = readLegacyStorage();
+    if (!migrated) return null;
+
+    await writeValue('snapshot', migrated);
+    return migrated;
+  } catch (error) {
+    console.warn('Offline storage read failed; localStorage fallback will be used.', error);
+
+    const fallback = readLegacyStorage();
+    return fallback;
+  }
+}
+
+export async function saveOfflineSnapshot(notes: unknown[], templates: unknown[]): Promise<void> {
+  const snapshot: Snapshot = {
+    notes: Array.isArray(notes) ? notes : [],
+    templates: Array.isArray(templates) ? templates : [],
+    savedAt: Date.now(),
+  };
+
+  try {
+    await writeValue('snapshot', snapshot);
   } catch (error) {
     console.warn('Offline storage save failed:', error);
-    // Keep the existing localStorage backup as a safety net.
     try {
-      localStorage.setItem('stickie-notes-rainbow', JSON.stringify(notes));
-      localStorage.setItem('stickie-templates-rainbow', JSON.stringify(templates));
+      localStorage.setItem('stickie-notes-rainbow', JSON.stringify(snapshot.notes));
+      localStorage.setItem('stickie-templates-rainbow', JSON.stringify(snapshot.templates));
     } catch {
       // Ignore quota/private-mode failures; the in-memory app remains usable.
     }
