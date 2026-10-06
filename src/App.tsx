@@ -1303,8 +1303,9 @@ export default function App() {
       if (lastUploadTargetId) {
         // Update existing note and keep the open editor synchronized.
         setNotes(prev => prev.map(n => n.id === lastUploadTargetId ? { ...n, image: base64 } : n));
-        if (lastUploadTargetId === activeNoteId) {
-          setEditContent(prev => prev);
+        if (lastUploadTargetId === activeNoteId && editorRef.current) {
+          // The image is rendered from the active note state; keep the editor focused.
+          editorRef.current.focus();
         }
         setLastUploadTargetId(null);
       } else {
