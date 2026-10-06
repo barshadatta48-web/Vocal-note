@@ -858,13 +858,24 @@ export default function App() {
       setIsEditorMenuOpen(false);
       setIsDrawing(false);
       setIsChatOpen(false);
-      if (window.history.state?.vocalNoteEditor === id) window.history.back();
-      else setActiveNoteId(null);
+      setActiveNoteId(null);
+      setEditContent('');
+      setLastSummaryNoteId(null);
+      setShowLastNoteSummary(false);
+      // A deleted note must never remain as a browser-history target.
+      window.history.replaceState(
+        { vocalNoteList: true },
+        '',
+        window.location.pathname + window.location.search
+      );
     }
   };
 
   const exportData = () => {
-    const data = JSON.stringify({ notes, templates });
+    const data = JSON.stringify({
+      notes: notesRef.current,
+      templates: templatesRef.current,
+    });
     const blob = new Blob([data], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -1290,8 +1301,11 @@ export default function App() {
     reader.onload = (e) => {
       const base64 = e.target?.result as string;
       if (lastUploadTargetId) {
-        // Update existing note
+        // Update existing note and keep the open editor synchronized.
         setNotes(prev => prev.map(n => n.id === lastUploadTargetId ? { ...n, image: base64 } : n));
+        if (lastUploadTargetId === activeNoteId) {
+          setEditContent(prev => prev);
+        }
         setLastUploadTargetId(null);
       } else {
         // Create new note with image
