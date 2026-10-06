@@ -393,6 +393,9 @@ export default function App() {
   const editorRef = useRef<HTMLDivElement>(null);
   const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
   const [activeNoteId, setActiveNoteId] = useState<string | null>(null);
+  const [showLastNoteSummary, setShowLastNoteSummary] = useState(false);
+  const [lastSummaryNoteId, setLastSummaryNoteId] = useState<string | null>(null);
+  const lastLeavingNoteIdRef = useRef<string | null>(null);
   const [editorMode, setEditorMode] = useState<'text' | 'draw'>('text');
   const [drawTool, setDrawTool] = useState<'pen' | 'eraser' | 'pan'>('pen');
   const [drawColor, setDrawColor] = useState('#000000');
@@ -695,12 +698,19 @@ export default function App() {
       return match ? decodeURIComponent(match[1]) : null;
     };
 
-    const closeEditor = () => {
+    const closeEditor = (showSummary = true) => {
+      const leavingNoteId = lastLeavingNoteIdRef.current || activeNoteId;
       setActiveNoteId(null);
       setIsDrawing(false);
       setIsChatOpen(false);
       setIsEditorMenuOpen(false);
       setOpenMenuId(null);
+
+      if (showSummary && leavingNoteId && notesRef.current.some(n => n.id === leavingNoteId)) {
+        setLastSummaryNoteId(leavingNoteId);
+        setShowLastNoteSummary(true);
+      }
+      lastLeavingNoteIdRef.current = null;
     };
 
     const restoreEditorFromHistory = () => {
@@ -736,7 +746,7 @@ export default function App() {
       window.removeEventListener('popstate', restoreEditorFromHistory);
       window.removeEventListener('hashchange', restoreEditorFromHistory);
     };
-  }, [offlineStorageReady]);
+  }, [offlineStorageReady, activeNoteId]);
 
   useEffect(() => {
     if (!offlineStorageReady || !activeNoteId) return;
@@ -904,6 +914,7 @@ export default function App() {
     if (!activeNoteId) return;
 
     const noteId = activeNoteId;
+    lastLeavingNoteIdRef.current = noteId;
     setNotes(prev =>
       prev.map(n =>
         n.id === noteId ? { ...n, content: editContent, fontSize: editFontSize } : n
@@ -911,13 +922,16 @@ export default function App() {
     );
     setIsEditorMenuOpen(false);
 
-    // Return through browser history so Back/Forward navigation remains predictable.
+    // Return through browser history so the dashboard is restored cleanly.
     if (window.history.state?.vocalNoteEditor === noteId) {
       window.history.back();
     } else {
       setActiveNoteId(null);
       setIsDrawing(false);
       setIsChatOpen(false);
+      setLastSummaryNoteId(noteId);
+      setShowLastNoteSummary(true);
+      lastLeavingNoteIdRef.current = null;
     }
   };
 
@@ -1043,6 +1057,15 @@ export default function App() {
   };
 
   const handleEditorKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    // Enter finishes the current note and returns to the dashboard.
+    // Shift+Enter is intentionally also treated as finish so Enter never inserts a new line.
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      e.stopPropagation();
+      saveNote();
+      return;
+    }
+
     // 1. Keyboard shortcuts: Ctrl+U / Cmd+U, Ctrl+B / Cmd+B
     if ((e.ctrlKey || e.metaKey) && (e.key === 'u' || e.key === 'U')) {
       e.preventDefault();
@@ -1884,7 +1907,8 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      <main className={`mx-auto pt-[100px] md:pt-[140px] pb-12 relative z-10 ${viewMode === 'grid' ? 'max-w-[1600px] px-4 md:px-8' : 'w-full min-h-[2000px]'}`}>
+      <main className={`mx-auto pt-[100px] md:pt-[140px] pb-12 relative z-10 ${viewMode === 'grid' ? 'max-w-[1600px] px-4 md:px-8' : 'w-full min-h-[2000px]'}`} data-note-dashboard>
+
         {notes.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 md:py-32 text-slate-400">
             <div className="p-6 md:p-8 rounded-full bg-white shadow-inner mb-6 border border-black/5">
@@ -2517,6 +2541,81 @@ export default function App() {
 
             </div>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Automatic last-note summary shown when returning to the dashboard */}
+      <AnimatePresence>
+        {showLastNoteSummary && lastSummaryNoteId && (
+          <div className="fixed inset-0 z-[1200] flex items-center justify-center p-5 md:p-8">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowLastNoteSummary(false)}
+              className="absolute inset-0 bg-black/45 backdrop-blur-md"
+            />
+            <motion.div
+              initial={{ opacity: 0, y: 24, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 16, scale: 0.97 }}
+              className="relative w-full max-w-xl overflow-hidden rounded-[28px] bg-white shadow-2xl border border-black/5"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="last-note-summary-title"
+            >
+              {(() => {
+                const summaryNote = notes.find(n => n.id === lastSummaryNoteId);
+                if (!summaryNote) return null;
+                return (
+                  <>
+                    <div className="px-6 md:px-8 pt-7 pb-5 border-b border-black/5">
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <p className="text-[10px] font-black uppercase tracking-[0.25em] text-indigo-500 mb-2">Back on Dashboard</p>
+                          <h2 id="last-note-summary-title" className="text-xl md:text-2xl font-black tracking-tight text-slate-900">Last Note Summary</h2>
+                        </div>
+                        <button
+                          onClick={() => setShowLastNoteSummary(false)}
+                          className="p-2 rounded-full hover:bg-slate-100 transition-colors"
+                          aria-label="Close summary"
+                        >
+                          <X size={18} />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="p-6 md:p-8">
+                      <div className={`rounded-2xl p-5 md:p-6 ${summaryNote.color} ${summaryNote.pattern && summaryNote.pattern !== 'none' ? summaryNote.pattern : ''}`}>
+                        <p className="text-[10px] font-black uppercase tracking-[0.2em] opacity-40 mb-3">Saved note</p>
+                        <div
+                          className="note-content text-base md:text-lg leading-relaxed text-slate-800"
+                          dangerouslySetInnerHTML={{ __html: getLastNoteSummary(summaryNote) }}
+                        />
+                      </div>
+                      <div className="mt-5 flex gap-3">
+                        <button
+                          onClick={() => setShowLastNoteSummary(false)}
+                          className="flex-1 py-3 rounded-xl bg-slate-900 text-white font-black text-[10px] uppercase tracking-widest hover:bg-slate-800 transition-colors"
+                        >
+                          Continue
+                        </button>
+                        <button
+                          onClick={() => {
+                            setShowLastNoteSummary(false);
+                            startEditing(summaryNote);
+                          }}
+                          className="flex-1 py-3 rounded-xl border border-black/10 bg-white text-slate-900 font-black text-[10px] uppercase tracking-widest hover:bg-slate-50 transition-colors"
+                        >
+                          Open Note
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                );
+              })()}
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
 
