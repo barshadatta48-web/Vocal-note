@@ -368,6 +368,7 @@ function isCaretAtStartOfNode(container: Node, offset: number, rootNode: Node): 
 
 export default function App() {
   const [notes, setNotes] = useState<Note[]>([]);
+  const notesRef = useRef<Note[]>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [offlineStorageReady, setOfflineStorageReady] = useState(false);
   const offlineSaveTimerRef = useRef<number | null>(null);
@@ -623,6 +624,12 @@ export default function App() {
     return () => { cancelled = true; };
   }, []);
 
+  // Keep a current notes reference for navigation/event handlers without
+  // re-registering browser history listeners every time a note is edited.
+  useEffect(() => {
+    notesRef.current = notes;
+  }, [notes]);
+
   // Persist the complete workspace after every change. IndexedDB keeps the
   // workspace available even when the browser is offline or localStorage is full.
   useEffect(() => {
@@ -677,35 +684,37 @@ export default function App() {
   }, [activeNoteId]);
 
   // Keep browser navigation synchronized with the single-note editor.
-  // The notes list is the base history entry. Each opened note gets one
-  // dedicated history entry so Back closes the current note and Forward restores it.
+  // The list is the base entry. Each opened note gets one dedicated entry.
   useEffect(() => {
+    if (!offlineStorageReady) return;
+
     const getNoteIdFromLocation = () => {
       const state = window.history.state;
       if (state?.vocalNoteEditor) return state.vocalNoteEditor as string;
-
       const match = window.location.hash.match(/^#note-(.+)$/);
       return match ? decodeURIComponent(match[1]) : null;
+    };
+
+    const closeEditor = () => {
+      setActiveNoteId(null);
+      setIsDrawing(false);
+      setIsChatOpen(false);
+      setIsEditorMenuOpen(false);
+      setOpenMenuId(null);
     };
 
     const restoreEditorFromHistory = () => {
       const noteId = getNoteIdFromLocation();
       if (!noteId) {
-        setActiveNoteId(null);
-        setIsDrawing(false);
-        setIsChatOpen(false);
-        setIsEditorMenuOpen(false);
-        setOpenMenuId(null);
+        closeEditor();
         return;
       }
-
-      const note = notes.find(n => n.id === noteId);
+      const note = notesRef.current.find(n => n.id === noteId);
       if (!note) {
         window.history.replaceState({ vocalNoteList: true }, '', window.location.pathname + window.location.search);
-        setActiveNoteId(null);
+        closeEditor();
         return;
       }
-
       setActiveNoteId(note.id);
       setIsDrawing(false);
       setEditContent(note.content);
@@ -716,15 +725,10 @@ export default function App() {
       setStagePos({ x: 0, y: 0 });
     };
 
-    // Establish a clean base entry once the app is mounted.
     if (!window.history.state?.vocalNoteEditor && !window.history.state?.vocalNoteList) {
       window.history.replaceState({ vocalNoteList: true }, '', window.location.pathname + window.location.search);
     }
-
-    const initialNoteId = getNoteIdFromLocation();
-    if (initialNoteId) {
-      restoreEditorFromHistory();
-    }
+    if (getNoteIdFromLocation()) restoreEditorFromHistory();
 
     window.addEventListener('popstate', restoreEditorFromHistory);
     window.addEventListener('hashchange', restoreEditorFromHistory);
@@ -732,23 +736,14 @@ export default function App() {
       window.removeEventListener('popstate', restoreEditorFromHistory);
       window.removeEventListener('hashchange', restoreEditorFromHistory);
     };
-  }, [notes]);
+  }, [offlineStorageReady]);
 
   useEffect(() => {
-    if (!activeNoteId) return;
-
-    const currentState = window.history.state;
-    if (currentState?.vocalNoteEditor === activeNoteId) return;
-
-    const note = notes.find(n => n.id === activeNoteId);
-    if (!note) return;
-
-    window.history.pushState(
-      { vocalNoteEditor: activeNoteId },
-      '',
-      `#note-${encodeURIComponent(activeNoteId)}`
-    );
-  }, [activeNoteId, notes]);
+    if (!offlineStorageReady || !activeNoteId) return;
+    if (window.history.state?.vocalNoteEditor === activeNoteId) return;
+    if (!notesRef.current.some(n => n.id === activeNoteId)) return;
+    window.history.pushState({ vocalNoteEditor: activeNoteId }, '', `#note-${encodeURIComponent(activeNoteId)}`);
+  }, [activeNoteId, offlineStorageReady]);
 
   // Handle outside clicks to close menus
   useEffect(() => {
@@ -760,7 +755,7 @@ export default function App() {
     return () => window.removeEventListener('click', handleClickOutside);
   }, []);
 
-  const addNote = (content = '', image?: string, drawingLines?: DrawingLine[], color?: string, pattern?: string) => {
+  const addNote = (content = '', image?: string, drawingLines?: DrawingLine[], color?: string, pattern?: string): string => {
     const notePatterns = PATTERNS.filter(p => p !== 'none');
     const newNote: Note = {
       id: crypto.randomUUID(),
@@ -786,6 +781,7 @@ export default function App() {
     setIsEditorMenuOpen(false);
     setStageScale(1);
     setStagePos({ x: 0, y: 0 });
+    return newNote.id;
   };
 
   const updateNotePosition = (id: string, x: number, y: number) => {
@@ -806,31 +802,35 @@ export default function App() {
       image: note.image,
       fontSize: note.fontSize,
     };
-    setTemplates([...templates, newTemplate]);
+    setTemplates(prev => [...prev, newTemplate]);
     setOpenMenuId(null);
     setIsEditorMenuOpen(false);
   };
 
   const applyTemplate = (template: Template) => {
-    addNote(template.content, template.image, template.drawingLines, template.color, template.pattern);
-    // Explicitly set font styling after adding if available
-    setNotes(prev => prev.map((n, i) => i === 0 ? { ...n, fontSize: template.fontSize || 48 } : n));
+    const newNoteId = addNote(template.content, template.image, template.drawingLines, template.color, template.pattern);
+    setNotes(prev => prev.map(n => n.id === newNoteId ? { ...n, fontSize: template.fontSize || 48 } : n));
     setIsTemplatesModalOpen(false);
     setIsHeaderMenuOpen(false);
   };
 
   const deleteTemplate = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    setTemplates(templates.filter(t => t.id !== id));
+    setTemplates(prev => prev.filter(t => t.id !== id));
   };
 
   const deleteNote = (id: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
-    setNotes(notes.filter((n) => n.id !== id));
-    if (activeNoteId === id) {
-      setActiveNoteId(null);
-    }
+    const deletingActiveNote = activeNoteId === id;
+    setNotes(prev => prev.filter(n => n.id !== id));
     setOpenMenuId(null);
+    if (deletingActiveNote) {
+      setIsEditorMenuOpen(false);
+      setIsDrawing(false);
+      setIsChatOpen(false);
+      if (window.history.state?.vocalNoteEditor === id) window.history.back();
+      else setActiveNoteId(null);
+    }
   };
 
   const exportData = () => {
@@ -853,8 +853,15 @@ export default function App() {
       reader.onload = (re) => {
         try {
           const data = JSON.parse(re.target?.result as string);
-          if (data.notes) setNotes(data.notes);
-          if (data.templates) setTemplates(data.templates);
+          const importedNotes = Array.isArray(data?.notes) ? data.notes : null;
+          const importedTemplates = Array.isArray(data?.templates) ? data.templates : null;
+          if (!importedNotes && !importedTemplates) throw new Error('Invalid backup structure');
+          if (importedNotes) setNotes(importedNotes);
+          if (importedTemplates) setTemplates(importedTemplates);
+          setActiveNoteId(null);
+          setIsDrawing(false);
+          setIsChatOpen(false);
+          window.history.replaceState({ vocalNoteList: true }, '', window.location.pathname + window.location.search);
           alert("Storage restored successfully!");
         } catch (err) {
           alert("Invalid backup file.");
@@ -916,14 +923,14 @@ export default function App() {
 
   const toggleComplete = (id: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
-    setNotes(notes.map(n => n.id === id ? { ...n, completed: !n.completed } : n));
+    setNotes(prev => prev.map(n => n.id === id ? { ...n, completed: !n.completed } : n));
     setOpenMenuId(null);
   };
 
   const changeColor = (id: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
     setNotes(
-      notes.map((n) => {
+      prev => prev.map((n) => {
         if (n.id === id) {
           const currentIndex = COLORS.indexOf(n.color);
           const nextIndex = (currentIndex + 1) % COLORS.length;
@@ -1183,8 +1190,6 @@ export default function App() {
       const prompt = type === 'template' 
         ? "Generate a creative and structured note template. Return HTML content."
         : `Continue or enhance this note content: "${editContent || 'Ideas for the week'}"`;
-
-      if (!ai) throw new Error('Gemini API key is not configured.');
 
       if (!ai) throw new Error('Gemini API key is not configured.');
 
@@ -1537,6 +1542,11 @@ export default function App() {
 
   const handleSendMessage = async () => {
     if (!chatInput.trim() || isLoading) return;
+    if (!ai) {
+      setMessages(prev => [...prev, { role: 'assistant', content: 'AI Assistant is unavailable because the Gemini API key is not configured.' }]);
+      setChatInput('');
+      return;
+    }
 
     const userMessage = chatInput.trim();
     setChatInput('');
