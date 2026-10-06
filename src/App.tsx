@@ -676,6 +676,34 @@ export default function App() {
     }
   }, [activeNoteId]);
 
+  // Keep browser navigation synchronized with the single-note editor.
+  // Opening a note creates a history entry; browser Back returns to the notes page.
+  useEffect(() => {
+    const handlePopState = () => {
+      setActiveNoteId(null);
+      setIsDrawing(false);
+      setIsChatOpen(false);
+      setIsEditorMenuOpen(false);
+      setOpenMenuId(null);
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  useEffect(() => {
+    if (activeNoteId) {
+      const currentState = window.history.state;
+      if (currentState?.vocalNoteEditor !== activeNoteId) {
+        window.history.pushState(
+          { vocalNoteEditor: activeNoteId },
+          '',
+          `#note-${activeNoteId}`
+        );
+      }
+    }
+  }, [activeNoteId]);
+
   // Handle outside clicks to close menus
   useEffect(() => {
     const handleClickOutside = () => {
@@ -820,14 +848,23 @@ export default function App() {
   };
 
   const saveNote = () => {
-    if (activeNoteId) {
-      setNotes(
-        notes.map((n) =>
-          n.id === activeNoteId ? { ...n, content: editContent, fontSize: editFontSize } : n
-        )
-      );
+    if (!activeNoteId) return;
+
+    const noteId = activeNoteId;
+    setNotes(prev =>
+      prev.map(n =>
+        n.id === noteId ? { ...n, content: editContent, fontSize: editFontSize } : n
+      )
+    );
+    setIsEditorMenuOpen(false);
+
+    // Return through browser history so Back/Forward navigation remains predictable.
+    if (window.history.state?.vocalNoteEditor === noteId) {
+      window.history.back();
+    } else {
       setActiveNoteId(null);
-      setIsEditorMenuOpen(false);
+      setIsDrawing(false);
+      setIsChatOpen(false);
     }
   };
 
