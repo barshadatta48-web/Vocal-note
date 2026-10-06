@@ -1,4 +1,4 @@
-const CACHE_NAME = 'vocal-note-pwa-v3';
+const CACHE_NAME = 'vocal-note-pwa-v4';
 const APP_SHELL = [
   '/',
   '/index.html',
