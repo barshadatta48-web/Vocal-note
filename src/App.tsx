@@ -701,12 +701,17 @@ export default function App() {
       y: 50 + (notes.length * 40) % 400,
       fontSize: 48,
     };
-    setNotes([newNote, ...notes]);
-    if (!content && !image && !drawingLines) {
-      setActiveNoteId(newNote.id);
-      setIsDrawing(false);
-      setEditContent('');
-    }
+    // Every note opens immediately in the dedicated single-page editor.
+    // Use a functional update so the new note is never lost if state updates are batched.
+    setNotes(prev => [newNote, ...prev]);
+    setActiveNoteId(newNote.id);
+    setIsDrawing(false);
+    setEditContent(content);
+    setEditFontSize(newNote.fontSize || 48);
+    setOpenMenuId(null);
+    setIsEditorMenuOpen(false);
+    setStageScale(1);
+    setStagePos({ x: 0, y: 0 });
   };
 
   const updateNotePosition = (id: string, x: number, y: number) => {
