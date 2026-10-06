@@ -677,32 +677,78 @@ export default function App() {
   }, [activeNoteId]);
 
   // Keep browser navigation synchronized with the single-note editor.
-  // Opening a note creates a history entry; browser Back returns to the notes page.
+  // The notes list is the base history entry. Each opened note gets one
+  // dedicated history entry so Back closes the current note and Forward restores it.
   useEffect(() => {
-    const handlePopState = () => {
-      setActiveNoteId(null);
-      setIsDrawing(false);
-      setIsChatOpen(false);
-      setIsEditorMenuOpen(false);
-      setOpenMenuId(null);
+    const getNoteIdFromLocation = () => {
+      const state = window.history.state;
+      if (state?.vocalNoteEditor) return state.vocalNoteEditor as string;
+
+      const match = window.location.hash.match(/^#note-(.+)$/);
+      return match ? decodeURIComponent(match[1]) : null;
     };
 
-    window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
-  }, []);
+    const restoreEditorFromHistory = () => {
+      const noteId = getNoteIdFromLocation();
+      if (!noteId) {
+        setActiveNoteId(null);
+        setIsDrawing(false);
+        setIsChatOpen(false);
+        setIsEditorMenuOpen(false);
+        setOpenMenuId(null);
+        return;
+      }
+
+      const note = notes.find(n => n.id === noteId);
+      if (!note) {
+        window.history.replaceState({ vocalNoteList: true }, '', window.location.pathname + window.location.search);
+        setActiveNoteId(null);
+        return;
+      }
+
+      setActiveNoteId(note.id);
+      setIsDrawing(false);
+      setEditContent(note.content);
+      setEditFontSize(note.fontSize || 48);
+      setIsEditorMenuOpen(false);
+      setOpenMenuId(null);
+      setStageScale(1);
+      setStagePos({ x: 0, y: 0 });
+    };
+
+    // Establish a clean base entry once the app is mounted.
+    if (!window.history.state?.vocalNoteEditor && !window.history.state?.vocalNoteList) {
+      window.history.replaceState({ vocalNoteList: true }, '', window.location.pathname + window.location.search);
+    }
+
+    const initialNoteId = getNoteIdFromLocation();
+    if (initialNoteId) {
+      restoreEditorFromHistory();
+    }
+
+    window.addEventListener('popstate', restoreEditorFromHistory);
+    window.addEventListener('hashchange', restoreEditorFromHistory);
+    return () => {
+      window.removeEventListener('popstate', restoreEditorFromHistory);
+      window.removeEventListener('hashchange', restoreEditorFromHistory);
+    };
+  }, [notes]);
 
   useEffect(() => {
-    if (activeNoteId) {
-      const currentState = window.history.state;
-      if (currentState?.vocalNoteEditor !== activeNoteId) {
-        window.history.pushState(
-          { vocalNoteEditor: activeNoteId },
-          '',
-          `#note-${activeNoteId}`
-        );
-      }
-    }
-  }, [activeNoteId]);
+    if (!activeNoteId) return;
+
+    const currentState = window.history.state;
+    if (currentState?.vocalNoteEditor === activeNoteId) return;
+
+    const note = notes.find(n => n.id === activeNoteId);
+    if (!note) return;
+
+    window.history.pushState(
+      { vocalNoteEditor: activeNoteId },
+      '',
+      `#note-${encodeURIComponent(activeNoteId)}`
+    );
+  }, [activeNoteId, notes]);
 
   // Handle outside clicks to close menus
   useEffect(() => {
