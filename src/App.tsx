@@ -1820,6 +1820,15 @@ export default function App() {
                   whileHover={{ scale: 1.02, zIndex: 10, y: viewMode === 'grid' ? -8 : (note.y - 8), transition: { duration: 0.2 } }}
                   whileDrag={{ scale: 1.1, zIndex: 100, boxShadow: "0 40px 80px rgba(0,0,0,0.2)" }}
                   onClick={() => startEditing(note)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      startEditing(note);
+                    }
+                  }}
+                  tabIndex={0}
+                  role="button"
+                  aria-label="Open note"
                   style={viewMode === 'board' ? { position: 'absolute', top: 0, left: 0 } : {}}
                   className={`
                     relative min-h-[300px] md:min-h-[380px] p-6 md:p-[30px] flex flex-col items-start
