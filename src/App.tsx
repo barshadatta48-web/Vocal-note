@@ -955,10 +955,12 @@ export default function App() {
     if (!activeNoteId) return;
 
     const noteId = activeNoteId;
+    const latestContent = editorRef.current?.innerHTML ?? editContent;
     lastLeavingNoteIdRef.current = noteId;
+    setEditContent(latestContent);
     setNotes(prev =>
       prev.map(n =>
-        n.id === noteId ? { ...n, content: editContent, fontSize: editFontSize } : n
+        n.id === noteId ? { ...n, content: latestContent, fontSize: editFontSize } : n
       )
     );
     setIsEditorMenuOpen(false);
