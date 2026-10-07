@@ -703,44 +703,66 @@ export default function App() {
   }, [activeNoteId, editContent]);
 
   // Keep browser navigation synchronized with the single-note editor.
-  // The list is the base entry. Each opened note gets one dedicated entry.
+  // History model:
+  //   dashboard = one base history entry
+  //   note      = one additional history entry
+  // Browser Back from a note therefore returns to the dashboard.
+  // Browser Forward restores the exact note.
+  // We intentionally listen only to popstate. Listening to both popstate and
+  // hashchange can process the same navigation twice in some browsers.
   useEffect(() => {
     if (!offlineStorageReady) return;
 
-    const getNoteIdFromLocation = () => {
+    const getNoteIdFromHistory = () => {
       const state = window.history.state;
       if (state?.vocalNoteEditor) return state.vocalNoteEditor as string;
+
       const match = window.location.hash.match(/^#note-(.+)$/);
       return match ? decodeURIComponent(match[1]) : null;
     };
 
-    const closeEditor = (showSummary = true) => {
+    const closeEditorFromHistory = () => {
       const leavingNoteId = lastLeavingNoteIdRef.current || activeNoteIdRef.current;
+
       setActiveNoteId(null);
       setIsDrawing(false);
       setIsChatOpen(false);
       setIsEditorMenuOpen(false);
       setOpenMenuId(null);
+      setStageScale(1);
+      setStagePos({ x: 0, y: 0 });
 
-      if (showSummary && leavingNoteId && notesRef.current.some(n => n.id === leavingNoteId)) {
+      if (leavingNoteId && notesRef.current.some(n => n.id === leavingNoteId)) {
         setLastSummaryNoteId(leavingNoteId);
         setShowLastNoteSummary(true);
       }
+
       lastLeavingNoteIdRef.current = null;
     };
 
     const restoreEditorFromHistory = () => {
-      const noteId = getNoteIdFromLocation();
+      const noteId = getNoteIdFromHistory();
+
       if (!noteId) {
-        closeEditor();
+        closeEditorFromHistory();
         return;
       }
+
       const note = notesRef.current.find(n => n.id === noteId);
       if (!note) {
-        window.history.replaceState({ vocalNoteList: true }, '', window.location.pathname + window.location.search);
-        closeEditor();
+        // Never leave the browser on a dead note route.
+        window.history.replaceState(
+          { vocalNoteList: true },
+          '',
+          window.location.pathname + window.location.search
+        );
+        closeEditorFromHistory();
         return;
       }
+
+      lastLeavingNoteIdRef.current = null;
+      setShowLastNoteSummary(false);
+      setLastSummaryNoteId(null);
       setActiveNoteId(note.id);
       setIsDrawing(false);
       setEditContent(note.content);
@@ -751,24 +773,59 @@ export default function App() {
       setStagePos({ x: 0, y: 0 });
     };
 
+    // Normalize the current entry once. Do not replace the entry while a note
+    // route is already active, because that would destroy Forward navigation.
     if (!window.history.state?.vocalNoteEditor && !window.history.state?.vocalNoteList) {
-      window.history.replaceState({ vocalNoteList: true }, '', window.location.pathname + window.location.search);
+      const hashNoteId = window.location.hash.match(/^#note-(.+)$/)?.[1];
+      if (hashNoteId) {
+        window.history.replaceState(
+          { vocalNoteEditor: decodeURIComponent(hashNoteId) },
+          '',
+          window.location.href
+        );
+      } else {
+        window.history.replaceState(
+          { vocalNoteList: true },
+          '',
+          window.location.pathname + window.location.search
+        );
+      }
     }
-    if (getNoteIdFromLocation()) restoreEditorFromHistory();
+
+    if (getNoteIdFromHistory()) {
+      restoreEditorFromHistory();
+    }
 
     window.addEventListener('popstate', restoreEditorFromHistory);
-    window.addEventListener('hashchange', restoreEditorFromHistory);
     return () => {
       window.removeEventListener('popstate', restoreEditorFromHistory);
-      window.removeEventListener('hashchange', restoreEditorFromHistory);
     };
   }, [offlineStorageReady]);
 
+  // Add exactly one browser-history entry when a note becomes active.
+  // Re-rendering/editing the same note must never create extra Back entries.
   useEffect(() => {
     if (!offlineStorageReady || !activeNoteId) return;
-    if (window.history.state?.vocalNoteEditor === activeNoteId) return;
     if (!notesRef.current.some(n => n.id === activeNoteId)) return;
-    window.history.pushState({ vocalNoteEditor: activeNoteId }, '', `#note-${encodeURIComponent(activeNoteId)}`);
+
+    const currentNoteId = window.history.state?.vocalNoteEditor as string | undefined;
+    if (currentNoteId === activeNoteId) return;
+
+    const hashNoteId = window.location.hash.match(/^#note-(.+)$/)?.[1];
+    if (hashNoteId && decodeURIComponent(hashNoteId) === activeNoteId) {
+      window.history.replaceState(
+        { vocalNoteEditor: activeNoteId },
+        '',
+        `#note-${encodeURIComponent(activeNoteId)}`
+      );
+      return;
+    }
+
+    window.history.pushState(
+      { vocalNoteEditor: activeNoteId },
+      '',
+      `#note-${encodeURIComponent(activeNoteId)}`
+    );
   }, [activeNoteId, offlineStorageReady]);
 
   // Handle outside clicks to close menus
@@ -971,17 +1028,21 @@ export default function App() {
     );
     setIsEditorMenuOpen(false);
 
-    // Return through browser history so the dashboard is restored cleanly.
+    // Return to the dashboard through the dedicated note history entry.
+    // This preserves normal Back/Forward semantics and lets popstate perform
+    // the single, centralized editor cleanup.
     if (window.history.state?.vocalNoteEditor === noteId) {
       window.history.back();
-    } else {
-      setActiveNoteId(null);
-      setIsDrawing(false);
-      setIsChatOpen(false);
-      setLastSummaryNoteId(noteId);
-      setShowLastNoteSummary(true);
-      lastLeavingNoteIdRef.current = null;
+      return;
     }
+
+    // Fallback for an editor opened before history initialization completed.
+    setActiveNoteId(null);
+    setIsDrawing(false);
+    setIsChatOpen(false);
+    setLastSummaryNoteId(noteId);
+    setShowLastNoteSummary(true);
+    lastLeavingNoteIdRef.current = null;
   };
 
   const toggleComplete = (id: string, e?: React.MouseEvent) => {
