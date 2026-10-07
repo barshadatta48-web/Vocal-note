@@ -1226,11 +1226,13 @@ export default function App() {
     e?.stopPropagation();
     if (activeNoteId === id && isDrawing) {
       setIsDrawing(false);
-    } else {
-      setActiveNoteId(id);
-      setIsDrawing(true);
-      setOpenMenuId(null);
+      return;
     }
+    const note = notesRef.current.find(n => n.id === id);
+    if (!note) return;
+    openNote(note);
+    setIsDrawing(true);
+    setOpenMenuId(null);
   };
 
   // Resize observer for drawing canvas
