@@ -7,9 +7,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Plus, Trash2, Edit3, Check, X, Palette, MessageCircle, Send, Sparkles, Loader2, Image as ImageIcon, Camera, MoreVertical, CheckCircle2, Mic, MicOff, Pencil, Eraser, ArrowLeft, Wand2, Bold, Type, Minus, Underline, Hand, Maximize, StickyNote, Download, Upload } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { GoogleGenAI } from "@google/genai";
-import { loadOfflineSnapshot, saveOfflineSnapshot } from './offlineStorage';
 
 import { Stage, Layer, Line as KonvaLine } from 'react-konva';
+import { postProcessSpeechTranscript, aiPostProcessSpeech } from './speechPostProcessor';
 
 interface DrawingLine {
   tool: string;
@@ -380,8 +380,6 @@ export default function App() {
   const editorRef = useRef<HTMLDivElement>(null);
   const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
   const [activeNoteId, setActiveNoteId] = useState<string | null>(null);
-  const activeNoteIdRef = useRef<string | null>(null);
-  const notesRef = useRef<Note[]>([]);
   const [editorMode, setEditorMode] = useState<'text' | 'draw'>('text');
   const [drawTool, setDrawTool] = useState<'pen' | 'eraser' | 'pan'>('pen');
   const [drawColor, setDrawColor] = useState('#000000');
@@ -419,23 +417,27 @@ export default function App() {
   const [micPermissionStatus, setMicPermissionStatus] = useState<'granted' | 'denied' | 'prompt' | 'unknown'>('unknown');
   const [micErrorMessage, setMicErrorMessage] = useState<string | null>(null);
 
-  // Keep the original AI Studio data model, with refs only for navigation/save correctness.
-  useEffect(() => { notesRef.current = notes; }, [notes]);
-  useEffect(() => { activeNoteIdRef.current = activeNoteId; }, [activeNoteId]);
-
   // Initialize Gemini
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-  // Load the original AI Studio data first, then hydrate from IndexedDB with localStorage fallback.
+  // Load notes and templates from localStorage
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const snapshot = await loadOfflineSnapshot();
-      if (cancelled || !snapshot) return;
-      if (Array.isArray(snapshot.notes)) setNotes(snapshot.notes as Note[]);
-      if (Array.isArray(snapshot.templates)) setTemplates(snapshot.templates as Template[]);
-    })().catch(error => console.warn('Offline snapshot load failed:', error));
-
+    const savedNotes = localStorage.getItem('stickie-notes-rainbow');
+    if (savedNotes) {
+      try {
+        setNotes(JSON.parse(savedNotes));
+      } catch (e) {
+        console.error('Failed to parse notes from local storage', e);
+      }
+    }
+    const savedTemplates = localStorage.getItem('stickie-templates-rainbow');
+    if (savedTemplates) {
+      try {
+        setTemplates(JSON.parse(savedTemplates));
+      } catch (e) {
+        console.error('Failed to parse templates', e);
+      }
+    }
 
     // Auto-popup AI assistant for new users
     const hasVisited = localStorage.getItem('vocal-note-visited');
@@ -484,21 +486,13 @@ export default function App() {
     }
   }, []);
 
-  // IndexedDB is the primary offline store; the storage module automatically falls back to localStorage.
+  // Save to localStorage
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      void saveOfflineSnapshot(notes, templates);
-    }, 100);
-    return () => window.clearTimeout(timer);
-  }, [notes, templates]);
-
-  // Keep the original AI Studio localStorage keys in sync for backward compatibility.
-  useEffect(() => {
-    try { localStorage.setItem('stickie-notes-rainbow', JSON.stringify(notes)); } catch {}
+    localStorage.setItem('stickie-notes-rainbow', JSON.stringify(notes));
   }, [notes]);
 
   useEffect(() => {
-    try { localStorage.setItem('stickie-templates-rainbow', JSON.stringify(templates)); } catch {}
+    localStorage.setItem('stickie-templates-rainbow', JSON.stringify(templates));
   }, [templates]);
 
   useEffect(() => {
@@ -542,60 +536,7 @@ export default function App() {
     return () => window.removeEventListener('click', handleClickOutside);
   }, []);
 
-  // Single-note navigation: dashboard is the base entry, each opened note is one history entry.
-  useEffect(() => {
-    const restoreFromHistory = () => {
-      const noteId = window.history.state?.vocalNoteEditor as string | undefined;
-      if (!noteId) {
-        setActiveNoteId(null);
-        setIsDrawing(false);
-        setIsEditorMenuOpen(false);
-        return;
-      }
-      const note = notesRef.current.find(n => n.id === noteId);
-      if (!note) {
-        setActiveNoteId(null);
-        setIsDrawing(false);
-        setIsEditorMenuOpen(false);
-        window.history.replaceState({}, '', window.location.pathname + window.location.search);
-        return;
-      }
-      setActiveNoteId(note.id);
-      setIsDrawing(false);
-      setEditContent(note.content);
-      setEditFontSize(note.fontSize || 48);
-      setIsEditorMenuOpen(false);
-      setStageScale(1);
-      setStagePos({ x: 0, y: 0 });
-    };
-    const initialHash = window.location.hash.match(/^#note-(.+)$/);
-    if (initialHash && !window.history.state?.vocalNoteEditor) {
-      const noteId = decodeURIComponent(initialHash[1]);
-      window.history.replaceState({ vocalNoteEditor: noteId }, '', window.location.href);
-    } else if (!window.history.state?.vocalNoteEditor) {
-      window.history.replaceState({}, '', window.location.href);
-    }
-    window.addEventListener('popstate', restoreFromHistory);
-    restoreFromHistory();
-    return () => window.removeEventListener('popstate', restoreFromHistory);
-  }, []);
-
-  const openNote = (note: Note) => {
-    setActiveNoteId(note.id);
-    setIsDrawing(false);
-    setEditContent(note.content);
-    setEditFontSize(note.fontSize || 48);
-    setOpenMenuId(null);
-    setIsEditorMenuOpen(false);
-    setStageScale(1);
-    setStagePos({ x: 0, y: 0 });
-    const currentId = window.history.state?.vocalNoteEditor as string | undefined;
-    if (currentId !== note.id) {
-      window.history.pushState({ vocalNoteEditor: note.id }, '', '#note-' + encodeURIComponent(note.id));
-    }
-  };
-
-  const addNote = (content = '', image?: string, drawingLines?: DrawingLine[], color?: string, pattern?: string): Note => {
+  const addNote = (content = '', image?: string, drawingLines?: DrawingLine[], color?: string, pattern?: string) => {
     const notePatterns = PATTERNS.filter(p => p !== 'none');
     const newNote: Note = {
       id: crypto.randomUUID(),
@@ -610,14 +551,12 @@ export default function App() {
       y: 50 + (notes.length * 40) % 400,
       fontSize: 48,
     };
-    setNotes(prev => [newNote, ...prev]);
+    setNotes([newNote, ...notes]);
     if (!content && !image && !drawingLines) {
-      window.history.pushState({ vocalNoteEditor: newNote.id }, '', '#note-' + encodeURIComponent(newNote.id));
       setActiveNoteId(newNote.id);
       setIsDrawing(false);
       setEditContent('');
     }
-    return newNote;
   };
 
   const updateNotePosition = (id: string, x: number, y: number) => {
@@ -638,22 +577,22 @@ export default function App() {
       image: note.image,
       fontSize: note.fontSize,
     };
-    setTemplates(prev => [...prev, newTemplate]);
+    setTemplates([...templates, newTemplate]);
     setOpenMenuId(null);
     setIsEditorMenuOpen(false);
   };
 
   const applyTemplate = (template: Template) => {
-    const created = addNote(template.content, template.image, template.drawingLines, template.color, template.pattern);
-    // Update only the newly created note; never overwrite another note.
-    if (created) setNotes(prev => prev.map(n => n.id === created.id ? { ...n, fontSize: template.fontSize || 48 } : n));
+    addNote(template.content, template.image, template.drawingLines, template.color, template.pattern);
+    // Explicitly set font styling after adding if available
+    setNotes(prev => prev.map((n, i) => i === 0 ? { ...n, fontSize: template.fontSize || 48 } : n));
     setIsTemplatesModalOpen(false);
     setIsHeaderMenuOpen(false);
   };
 
   const deleteTemplate = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    setTemplates(prev => prev.filter(t => t.id !== id));
+    setTemplates(templates.filter(t => t.id !== id));
   };
 
   const deleteNote = (id: string, e?: React.MouseEvent) => {
@@ -661,11 +600,6 @@ export default function App() {
     setNotes(notes.filter((n) => n.id !== id));
     if (activeNoteId === id) {
       setActiveNoteId(null);
-      setEditContent('');
-      setIsDrawing(false);
-      setIsEditorMenuOpen(false);
-      setOpenMenuId(null);
-      if (window.history.state?.vocalNoteEditor === id) window.history.back();
     }
     setOpenMenuId(null);
   };
@@ -683,45 +617,20 @@ export default function App() {
   const importData = () => {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = '.json,application/json';
+    input.accept = '.json';
     input.onchange = (e: any) => {
-      const file = e.target.files?.[0];
-      if (!file) return;
+      const file = e.target.files[0];
       const reader = new FileReader();
       reader.onload = (re) => {
         try {
-          const data = JSON.parse(String(re.target?.result || ''));
-          if (!data || typeof data !== 'object' || !Array.isArray(data.notes) || !Array.isArray(data.templates)) {
-            throw new Error('Backup must contain notes and templates arrays.');
-          }
-          const validNotes = data.notes.filter((n: any) =>
-            n && typeof n === 'object' && typeof n.id === 'string' && typeof n.content === 'string' &&
-            typeof n.color === 'string' && typeof n.rotation === 'number' &&
-            typeof n.x === 'number' && typeof n.y === 'number'
-          );
-          const validTemplates = data.templates.filter((t: any) =>
-            t && typeof t === 'object' && typeof t.id === 'string' && typeof t.name === 'string' &&
-            typeof t.content === 'string' && typeof t.color === 'string'
-          );
-          if (validNotes.length !== data.notes.length || validTemplates.length !== data.templates.length) {
-            throw new Error('Backup contains invalid note or template records.');
-          }
-          setNotes(validNotes as Note[]);
-          setTemplates(validTemplates as Template[]);
-          setActiveNoteId(null);
-          setIsDrawing(false);
-          setOpenMenuId(null);
-          setIsEditorMenuOpen(false);
-          if (window.history.state?.vocalNoteEditor) window.history.replaceState({}, '', window.location.pathname + window.location.search);
+          const data = JSON.parse(re.target?.result as string);
+          if (data.notes) setNotes(data.notes);
+          if (data.templates) setTemplates(data.templates);
           alert("Storage restored successfully!");
         } catch (err) {
-          console.error('Import validation failed:', err);
-          alert("Invalid backup file. Your existing notes were not changed.");
-        } finally {
-          input.value = '';
+          alert("Invalid backup file.");
         }
       };
-      reader.onerror = () => alert("Unable to read backup file. Your existing notes were not changed.");
       reader.readAsText(file);
     };
     input.click();
@@ -729,36 +638,54 @@ export default function App() {
 
   const startEditing = (note: Note, e?: React.MouseEvent) => {
     e?.stopPropagation();
-    openNote(note);
+    setActiveNoteId(note.id);
+    setIsDrawing(false);
+    setEditContent(note.content);
+    setEditFontSize(note.fontSize || 48);
+    setOpenMenuId(null);
+    setIsEditorMenuOpen(false);
+    
+    // Reset canvas view
+    setStageScale(1);
+    setStagePos({ x: 0, y: 0 });
   };
 
   const startDrawing = (note: Note, e?: React.MouseEvent) => {
     e?.stopPropagation();
-    openNote(note);
+    setActiveNoteId(note.id);
     setIsDrawing(true);
+    setEditContent(note.content);
+    setEditFontSize(note.fontSize || 48);
+    setOpenMenuId(null);
+    setIsEditorMenuOpen(false);
+    
+    // Reset canvas view
+    setStageScale(1);
+    setStagePos({ x: 0, y: 0 });
   };
 
   const saveNote = () => {
-    const id = activeNoteIdRef.current;
-    if (!id) return;
-    const latestContent = editorRef.current?.innerHTML ?? editContent;
-    setEditContent(latestContent);
-    setNotes(prev => prev.map(n => n.id === id ? { ...n, content: latestContent, fontSize: editFontSize } : n));
-    setIsEditorMenuOpen(false);
-    if (window.history.state?.vocalNoteEditor === id) window.history.back();
-    else setActiveNoteId(null);
+    if (activeNoteId) {
+      setNotes(
+        notes.map((n) =>
+          n.id === activeNoteId ? { ...n, content: editContent, fontSize: editFontSize } : n
+        )
+      );
+      setActiveNoteId(null);
+      setIsEditorMenuOpen(false);
+    }
   };
 
   const toggleComplete = (id: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
-    setNotes(prev => prev.map(n => n.id === id ? { ...n, completed: !n.completed } : n));
+    setNotes(notes.map(n => n.id === id ? { ...n, completed: !n.completed } : n));
     setOpenMenuId(null);
   };
 
   const changeColor = (id: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
     setNotes(
-      prev => prev.map((n) => {
+      notes.map((n) => {
         if (n.id === id) {
           const currentIndex = COLORS.indexOf(n.color);
           const nextIndex = (currentIndex + 1) % COLORS.length;
@@ -886,13 +813,6 @@ export default function App() {
     // Navigation keys: caret moved, reset keepUnderlineActiveRef
     if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown', 'Escape'].includes(e.key)) {
       keepUnderlineActiveRef.current = false;
-      return;
-    }
-
-    if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
-      e.preventDefault();
-      if (isRecording) recognitionRef.current?.stop();
-      saveNote();
       return;
     }
 
@@ -1026,11 +946,26 @@ export default function App() {
         ? "Generate a creative and structured note template. Return HTML content."
         : `Continue or enhance this note content: "${editContent || 'Ideas for the week'}"`;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: prompt,
-      });
-      const aiText = response.text;
+      let aiText = '';
+      try {
+        const res = await fetch('/api/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          aiText = data.text || '';
+        } else {
+          throw new Error('Server proxy unavailable');
+        }
+      } catch {
+        const response = await ai.models.generateContent({
+          model: "gemini-3-flash-preview",
+          contents: prompt,
+        });
+        aiText = response.text || '';
+      }
 
       if (aiText) {
         if (type === 'template') {
@@ -1052,16 +987,6 @@ export default function App() {
   const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
-    if (!file.type.startsWith('image/')) {
-      alert('Please select an image file.');
-      event.target.value = '';
-      return;
-    }
-    if (file.size > 10 * 1024 * 1024) {
-      alert('Image is too large. Please choose an image under 10 MB.');
-      event.target.value = '';
-      return;
-    }
 
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -1096,13 +1021,6 @@ export default function App() {
     e.stopPropagation();
     setOpenMenuId(openMenuId === id ? null : id);
   };
-
-  useEffect(() => {
-    return () => {
-      try { recognitionRef.current?.stop?.(); } catch {}
-      recognitionRef.current = null;
-    };
-  }, []);
 
   const startVoiceRecording = async (target: 'chat' | 'note' = 'chat', e?: React.MouseEvent) => {
     e?.stopPropagation();
@@ -1166,41 +1084,70 @@ export default function App() {
     recognition.onresult = (event: any) => {
       const current = event.resultIndex;
       const transcript = event.results[current][0].transcript;
-      const cleanTranscript = transcript.trim();
+      const isHtml = target === 'note';
+      const cleanTranscript = postProcessSpeechTranscript(transcript.trim(), isHtml);
       
       if (cleanTranscript.length === 0) return;
       
       if (target === 'chat') {
         setChatInput(prev => {
-          // If we already have this in the end of prev, don't add it
           if (prev.endsWith(cleanTranscript)) return prev;
-          const combined = prev + (prev ? ' ' : '') + cleanTranscript;
+          const needsSpace = prev.length > 0 && 
+            !prev.endsWith('\n') && 
+            !prev.endsWith(' ') && 
+            !cleanTranscript.startsWith('\n') &&
+            !/^[.,!?:;]/.test(cleanTranscript);
+          const spacer = needsSpace ? ' ' : '';
+          const combined = prev + spacer + cleanTranscript;
           return combined.slice(0, MAX_CHARS);
         });
       } else {
         setEditContent(prev => {
           if (prev.endsWith(cleanTranscript)) return prev;
-          const combined = prev + (prev ? ' ' : '') + cleanTranscript;
+          const needsSpace = prev.length > 0 && 
+            !prev.endsWith('<br>') && 
+            !prev.endsWith(' ') && 
+            !cleanTranscript.startsWith('<br>') &&
+            !/^[.,!?:;]/.test(cleanTranscript);
+          const spacer = needsSpace ? ' ' : '';
+          const combined = prev + spacer + cleanTranscript;
           return combined.slice(0, MAX_CHARS);
         });
         if (editorRef.current) {
           const content = editorRef.current.innerHTML;
           if (!content.endsWith(cleanTranscript)) {
-            editorRef.current.innerHTML = content + (content.length > 0 ? ' ' : '') + cleanTranscript;
+            const needsSpace = content.length > 0 && 
+              !content.endsWith('<br>') && 
+              !content.endsWith(' ') && 
+              !cleanTranscript.startsWith('<br>') &&
+              !/^[.,!?:;]/.test(cleanTranscript);
+            const spacer = needsSpace ? ' ' : '';
+            editorRef.current.innerHTML = content + spacer + cleanTranscript;
+            normalizeEditorUnderlines(editorRef.current);
           }
         }
       }
     };
 
-    recognition.onend = () => {
+    recognition.onend = async () => {
       setIsRecording(false);
-      if (recognitionRef.current === recognition) recognitionRef.current = null;
+      // Asynchronous AI polish for complex spoken sentences
+      if (target === 'note' && editorRef.current && activeNoteId) {
+        const currentHtml = editorRef.current.innerHTML;
+        if (/\b(?:period|comma|question\s+mark|exclamation\s+(?:mark|point)|new\s+line|next\s+line|colon|semicolon|full\s+stop)\b/i.test(currentHtml)) {
+          const polished = await aiPostProcessSpeech(currentHtml, true);
+          if (polished && polished !== currentHtml && editorRef.current) {
+            editorRef.current.innerHTML = polished;
+            setEditContent(polished);
+            setNotes(prev => prev.map(n => n.id === activeNoteId ? { ...n, content: polished } : n));
+          }
+        }
+      }
     };
 
     recognition.onerror = (event: any) => {
       console.error("Speech recognition error handle:", event.error);
       setIsRecording(false);
-      if (recognitionRef.current === recognition) recognitionRef.current = null;
       
       if (event.error === 'not-allowed') {
         setMicPermissionStatus('denied');
@@ -1226,13 +1173,11 @@ export default function App() {
     e?.stopPropagation();
     if (activeNoteId === id && isDrawing) {
       setIsDrawing(false);
-      return;
+    } else {
+      setActiveNoteId(id);
+      setIsDrawing(true);
+      setOpenMenuId(null);
     }
-    const note = notesRef.current.find(n => n.id === id);
-    if (!note) return;
-    openNote(note);
-    setIsDrawing(true);
-    setOpenMenuId(null);
   };
 
   // Resize observer for drawing canvas
@@ -1304,11 +1249,7 @@ export default function App() {
     };
 
     const speed = 0.05;
-    const MIN_SCALE = 0.25;
-    const MAX_SCALE = 4;
-    const requestedScale = e.evt.deltaY > 0 ? oldScale * (1 - speed) : oldScale * (1 + speed);
-    const newScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, requestedScale));
-    if (newScale === oldScale) return;
+    const newScale = e.evt.deltaY > 0 ? oldScale * (1 - speed) : oldScale * (1 + speed);
 
     setStageScale(newScale);
     setStagePos({
@@ -1415,11 +1356,26 @@ export default function App() {
       const context = activeNote ? `Current Note Content: ${stripHtml(activeNote.content)}` : "";
       
       const prompt = `System: You are Vocal Note, a creative AI voice-enabled notepad assistant. ${context}\nUser: ${userMessage}`;
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: prompt,
-      });
-      const aiResponse = response.text || "I'm sorry, I couldn't process that.";
+      let aiResponse = '';
+      try {
+        const res = await fetch('/api/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          aiResponse = data.text || '';
+        } else {
+          throw new Error('Server proxy unavailable');
+        }
+      } catch {
+        const response = await ai.models.generateContent({
+          model: "gemini-3-flash-preview",
+          contents: prompt,
+        });
+        aiResponse = response.text || "I'm sorry, I couldn't process that.";
+      }
 
       setMessages(prev => [...prev, { role: 'assistant', content: aiResponse }]);
     } catch (error) {
@@ -1971,6 +1927,22 @@ export default function App() {
               <div className={`flex-1 relative overflow-hidden flex flex-col transition-all duration-500 ${notes.find(n => n.id === activeNoteId)?.color}`}>
                 <div className="flex-1 w-full max-w-5xl mx-auto p-6 md:p-12 lg:p-24 relative flex flex-col">
                   
+                  {/* Voice Dictation Active Banner */}
+                  {isRecording && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -10 }}
+                      className="mb-6 mx-auto px-4 py-2 bg-slate-900/90 backdrop-blur-md text-white text-xs rounded-2xl shadow-xl flex flex-wrap items-center justify-center gap-2 border border-white/10 z-30"
+                    >
+                      <div className="w-2 h-2 rounded-full bg-red-500 animate-ping shrink-0" />
+                      <span className="font-bold tracking-wider uppercase text-[9px] text-red-400">Listening:</span>
+                      <span className="text-slate-300 text-[11px]">
+                        Say <span className="text-white font-semibold">"bold [words]"</span>, <span className="text-white font-semibold">"underline [words]"</span>, <span className="text-white font-semibold">"period"</span>, <span className="text-white font-semibold">"comma"</span>, <span className="text-white font-semibold">"question mark"</span>, <span className="text-white font-semibold">"new line"</span>
+                      </span>
+                    </motion.div>
+                  )}
+                  
                   {/* Photo Layer */}
                   {notes.find(n => n.id === activeNoteId)?.image && (
                     <div className="relative mb-8 group shrink-0 z-10 w-full max-w-2xl mx-auto">
@@ -2172,7 +2144,10 @@ export default function App() {
                           <div className="bg-indigo-600 p-4 md:p-6 rounded-full mb-4 animate-pulse shadow-[0_0_30px_rgba(79,70,229,0.3)]">
                             <Mic size={24} className="md:w-8 md:h-8 text-white" />
                           </div>
-                          <span className="tracking-[0.3em] uppercase text-[9px] md:text-[10px] font-black text-white/40 mb-6">Engine Listening...</span>
+                          <span className="tracking-[0.3em] uppercase text-[9px] md:text-[10px] font-black text-white/40 mb-2">Engine Listening...</span>
+                          <p className="text-[11px] text-indigo-300 font-medium mb-5 text-center max-w-xs">
+                            Speak formatting & punctuation: <span className="text-white font-semibold">"bold [words]"</span>, <span className="text-white font-semibold">"underline [words]"</span>, <span className="text-white font-semibold">"period"</span>, <span className="text-white font-semibold">"comma"</span>, <span className="text-white font-semibold">"question mark"</span>, <span className="text-white font-semibold">"new line"</span>
+                          </p>
                           <button 
                             onClick={() => recognitionRef.current?.stop()}
                             className="w-full px-8 py-3 bg-white text-slate-950 rounded-xl md:rounded-2xl text-[10px] md:text-[11px] font-black uppercase tracking-widest hover:bg-slate-100 transition-all shadow-lg active:scale-95"

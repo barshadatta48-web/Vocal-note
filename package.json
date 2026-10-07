@@ -6,9 +6,15 @@
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
     "build": "vite build",
+    "gcp-build": "vite build",
+    "prestart": "vite build",
+    "start": "node server.ts",
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=22.0.0"
   },
   "dependencies": {
     "@google/genai": "^1.29.0",
