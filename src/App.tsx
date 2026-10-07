@@ -702,28 +702,18 @@ export default function App() {
     }
   }, [activeNoteId, editContent]);
 
-  // Keep browser navigation synchronized with the single-note editor.
-  // History model:
-  //   dashboard = one base history entry
-  //   note      = one additional history entry
-  // Browser Back from a note therefore returns to the dashboard.
-  // Browser Forward restores the exact note.
-  // We intentionally listen only to popstate. Listening to both popstate and
-  // hashchange can process the same navigation twice in some browsers.
+  // Browser history is the single source of truth for dashboard/note navigation.
+  // There is exactly one dashboard entry and one entry per opened note.
   useEffect(() => {
     if (!offlineStorageReady) return;
 
-    const getNoteIdFromHistory = () => {
+    const readHistoryNoteId = (): string | null => {
       const state = window.history.state;
-      if (state?.vocalNoteEditor) return state.vocalNoteEditor as string;
-
-      const match = window.location.hash.match(/^#note-(.+)$/);
-      return match ? decodeURIComponent(match[1]) : null;
+      return typeof state?.vocalNoteEditor === 'string' ? state.vocalNoteEditor : null;
     };
 
-    const closeEditorFromHistory = () => {
-      const leavingNoteId = lastLeavingNoteIdRef.current || activeNoteIdRef.current;
-
+    const showDashboard = (showSummary = true) => {
+      const leavingNoteId = activeNoteIdRef.current;
       setActiveNoteId(null);
       setIsDrawing(false);
       setIsChatOpen(false);
@@ -732,31 +722,24 @@ export default function App() {
       setStageScale(1);
       setStagePos({ x: 0, y: 0 });
 
-      if (leavingNoteId && notesRef.current.some(n => n.id === leavingNoteId)) {
+      if (showSummary && leavingNoteId && notesRef.current.some(n => n.id === leavingNoteId)) {
         setLastSummaryNoteId(leavingNoteId);
         setShowLastNoteSummary(true);
       }
-
       lastLeavingNoteIdRef.current = null;
     };
 
-    const restoreEditorFromHistory = () => {
-      const noteId = getNoteIdFromHistory();
-
+    const restoreFromHistory = () => {
+      const noteId = readHistoryNoteId();
       if (!noteId) {
-        closeEditorFromHistory();
+        showDashboard(true);
         return;
       }
 
       const note = notesRef.current.find(n => n.id === noteId);
       if (!note) {
-        // Never leave the browser on a dead note route.
-        window.history.replaceState(
-          { vocalNoteList: true },
-          '',
-          window.location.pathname + window.location.search
-        );
-        closeEditorFromHistory();
+        window.history.replaceState({ vocalNoteList: true }, '', window.location.pathname + window.location.search);
+        showDashboard(false);
         return;
       }
 
@@ -765,6 +748,7 @@ export default function App() {
       setLastSummaryNoteId(null);
       setActiveNoteId(note.id);
       setIsDrawing(false);
+      setIsChatOpen(false);
       setEditContent(note.content);
       setEditFontSize(note.fontSize || 48);
       setIsEditorMenuOpen(false);
@@ -773,60 +757,26 @@ export default function App() {
       setStagePos({ x: 0, y: 0 });
     };
 
-    // Normalize the current entry once. Do not replace the entry while a note
-    // route is already active, because that would destroy Forward navigation.
-    if (!window.history.state?.vocalNoteEditor && !window.history.state?.vocalNoteList) {
-      const hashNoteId = window.location.hash.match(/^#note-(.+)$/)?.[1];
-      if (hashNoteId) {
-        window.history.replaceState(
-          { vocalNoteEditor: decodeURIComponent(hashNoteId) },
-          '',
-          window.location.href
-        );
+    const existingNoteId = readHistoryNoteId();
+    if (existingNoteId) {
+      const note = notesRef.current.find(n => n.id === existingNoteId);
+      if (note) restoreFromHistory();
+      else window.history.replaceState({ vocalNoteList: true }, '', window.location.pathname + window.location.search);
+    } else if (!window.history.state?.vocalNoteList) {
+      const legacyHash = window.location.hash.match(/^#note-(.+)$/)?.[1];
+      const legacyNoteId = legacyHash ? decodeURIComponent(legacyHash) : null;
+      const note = legacyNoteId ? notesRef.current.find(n => n.id === legacyNoteId) : null;
+      if (note) {
+        window.history.replaceState({ vocalNoteEditor: note.id }, '', '#note-' + encodeURIComponent(note.id));
+        restoreFromHistory();
       } else {
-        window.history.replaceState(
-          { vocalNoteList: true },
-          '',
-          window.location.pathname + window.location.search
-        );
+        window.history.replaceState({ vocalNoteList: true }, '', window.location.pathname + window.location.search);
       }
     }
 
-    if (getNoteIdFromHistory()) {
-      restoreEditorFromHistory();
-    }
-
-    window.addEventListener('popstate', restoreEditorFromHistory);
-    return () => {
-      window.removeEventListener('popstate', restoreEditorFromHistory);
-    };
+    window.addEventListener('popstate', restoreFromHistory);
+    return () => window.removeEventListener('popstate', restoreFromHistory);
   }, [offlineStorageReady]);
-
-  // Add exactly one browser-history entry when a note becomes active.
-  // Re-rendering/editing the same note must never create extra Back entries.
-  useEffect(() => {
-    if (!offlineStorageReady || !activeNoteId) return;
-    if (!notesRef.current.some(n => n.id === activeNoteId)) return;
-
-    const currentNoteId = window.history.state?.vocalNoteEditor as string | undefined;
-    if (currentNoteId === activeNoteId) return;
-
-    const hashNoteId = window.location.hash.match(/^#note-(.+)$/)?.[1];
-    if (hashNoteId && decodeURIComponent(hashNoteId) === activeNoteId) {
-      window.history.replaceState(
-        { vocalNoteEditor: activeNoteId },
-        '',
-        `#note-${encodeURIComponent(activeNoteId)}`
-      );
-      return;
-    }
-
-    window.history.pushState(
-      { vocalNoteEditor: activeNoteId },
-      '',
-      `#note-${encodeURIComponent(activeNoteId)}`
-    );
-  }, [activeNoteId, offlineStorageReady]);
 
   // Handle outside clicks to close menus
   useEffect(() => {
@@ -837,6 +787,28 @@ export default function App() {
     window.addEventListener('click', handleClickOutside);
     return () => window.removeEventListener('click', handleClickOutside);
   }, []);
+
+  const openNote = (noteId: string) => {
+    const note = notesRef.current.find(n => n.id === noteId);
+    if (!note) return;
+
+    lastLeavingNoteIdRef.current = null;
+    setShowLastNoteSummary(false);
+    setLastSummaryNoteId(null);
+    setActiveNoteId(note.id);
+    setIsDrawing(false);
+    setIsChatOpen(false);
+    setEditContent(note.content);
+    setEditFontSize(note.fontSize || 48);
+    setOpenMenuId(null);
+    setIsEditorMenuOpen(false);
+    setStageScale(1);
+    setStagePos({ x: 0, y: 0 });
+
+    if (window.history.state?.vocalNoteEditor !== note.id) {
+      window.history.pushState({ vocalNoteEditor: note.id }, '', '#note-' + encodeURIComponent(note.id));
+    }
+  };
 
   const addNote = (content = '', image?: string, drawingLines?: DrawingLine[], color?: string, pattern?: string): string => {
     const notePatterns = PATTERNS.filter(p => p !== 'none');
@@ -858,7 +830,6 @@ export default function App() {
     lastLeavingNoteIdRef.current = null;
     setShowLastNoteSummary(false);
     setNotes(prev => [newNote, ...prev]);
-    setActiveNoteId(newNote.id);
     setIsDrawing(false);
     setEditContent(content);
     setEditFontSize(newNote.fontSize || 48);
@@ -866,6 +837,8 @@ export default function App() {
     setIsEditorMenuOpen(false);
     setStageScale(1);
     setStagePos({ x: 0, y: 0 });
+    window.history.pushState({ vocalNoteEditor: newNote.id }, '', '#note-' + encodeURIComponent(newNote.id));
+    setActiveNoteId(newNote.id);
     return newNote.id;
   };
 
@@ -984,9 +957,7 @@ export default function App() {
 
   const startEditing = (note: Note, e?: React.MouseEvent) => {
     e?.stopPropagation();
-    lastLeavingNoteIdRef.current = null;
-    setShowLastNoteSummary(false);
-    setActiveNoteId(note.id);
+    openNote(note.id);
     setIsDrawing(false);
     setEditContent(note.content);
     setEditFontSize(note.fontSize || 48);
@@ -1000,9 +971,8 @@ export default function App() {
 
   const startDrawing = (note: Note, e?: React.MouseEvent) => {
     e?.stopPropagation();
-    lastLeavingNoteIdRef.current = null;
-    setShowLastNoteSummary(false);
-    setActiveNoteId(note.id);
+    openNote(note.id);
+    setIsDrawing(true);
     setIsDrawing(true);
     setEditContent(note.content);
     setEditFontSize(note.fontSize || 48);
