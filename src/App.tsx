@@ -7,6 +7,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Plus, Trash2, Edit3, Check, X, Palette, MessageCircle, Send, Sparkles, Loader2, Image as ImageIcon, Camera, MoreVertical, CheckCircle2, Mic, MicOff, Pencil, Eraser, ArrowLeft, Wand2, Bold, Type, Minus, Underline, Hand, Maximize, StickyNote, Download, Upload } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { GoogleGenAI } from "@google/genai";
+import { loadOfflineSnapshot, saveOfflineSnapshot } from './offlineStorage';
 
 import { Stage, Layer, Line as KonvaLine } from 'react-konva';
 
@@ -425,24 +426,16 @@ export default function App() {
   // Initialize Gemini
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-  // Load notes and templates from localStorage
+  // Load the original AI Studio data first, then hydrate from IndexedDB with localStorage fallback.
   useEffect(() => {
-    const savedNotes = localStorage.getItem('stickie-notes-rainbow');
-    if (savedNotes) {
-      try {
-        setNotes(JSON.parse(savedNotes));
-      } catch (e) {
-        console.error('Failed to parse notes from local storage', e);
-      }
-    }
-    const savedTemplates = localStorage.getItem('stickie-templates-rainbow');
-    if (savedTemplates) {
-      try {
-        setTemplates(JSON.parse(savedTemplates));
-      } catch (e) {
-        console.error('Failed to parse templates', e);
-      }
-    }
+    let cancelled = false;
+    (async () => {
+      const snapshot = await loadOfflineSnapshot();
+      if (cancelled || !snapshot) return;
+      if (Array.isArray(snapshot.notes)) setNotes(snapshot.notes as Note[]);
+      if (Array.isArray(snapshot.templates)) setTemplates(snapshot.templates as Template[]);
+    })().catch(error => console.warn('Offline snapshot load failed:', error));
+
 
     // Auto-popup AI assistant for new users
     const hasVisited = localStorage.getItem('vocal-note-visited');
@@ -491,13 +484,21 @@ export default function App() {
     }
   }, []);
 
-  // Save to localStorage
+  // IndexedDB is the primary offline store; the storage module automatically falls back to localStorage.
   useEffect(() => {
-    localStorage.setItem('stickie-notes-rainbow', JSON.stringify(notes));
+    const timer = window.setTimeout(() => {
+      void saveOfflineSnapshot(notes, templates);
+    }, 100);
+    return () => window.clearTimeout(timer);
+  }, [notes, templates]);
+
+  // Keep the original AI Studio localStorage keys in sync for backward compatibility.
+  useEffect(() => {
+    try { localStorage.setItem('stickie-notes-rainbow', JSON.stringify(notes)); } catch {}
   }, [notes]);
 
   useEffect(() => {
-    localStorage.setItem('stickie-templates-rainbow', JSON.stringify(templates));
+    try { localStorage.setItem('stickie-templates-rainbow', JSON.stringify(templates)); } catch {}
   }, [templates]);
 
   useEffect(() => {
@@ -594,7 +595,7 @@ export default function App() {
     }
   };
 
-  const addNote = (content = '', image?: string, drawingLines?: DrawingLine[], color?: string, pattern?: string) => {
+  const addNote = (content = '', image?: string, drawingLines?: DrawingLine[], color?: string, pattern?: string): Note => {
     const notePatterns = PATTERNS.filter(p => p !== 'none');
     const newNote: Note = {
       id: crypto.randomUUID(),
@@ -609,13 +610,14 @@ export default function App() {
       y: 50 + (notes.length * 40) % 400,
       fontSize: 48,
     };
-    setNotes([newNote, ...notes]);
+    setNotes(prev => [newNote, ...prev]);
     if (!content && !image && !drawingLines) {
       window.history.pushState({ vocalNoteEditor: newNote.id }, '', '#note-' + encodeURIComponent(newNote.id));
       setActiveNoteId(newNote.id);
       setIsDrawing(false);
       setEditContent('');
     }
+    return newNote;
   };
 
   const updateNotePosition = (id: string, x: number, y: number) => {
@@ -636,22 +638,22 @@ export default function App() {
       image: note.image,
       fontSize: note.fontSize,
     };
-    setTemplates([...templates, newTemplate]);
+    setTemplates(prev => [...prev, newTemplate]);
     setOpenMenuId(null);
     setIsEditorMenuOpen(false);
   };
 
   const applyTemplate = (template: Template) => {
-    addNote(template.content, template.image, template.drawingLines, template.color, template.pattern);
-    // Explicitly set font styling after adding if available
-    setNotes(prev => prev.map((n, i) => i === 0 ? { ...n, fontSize: template.fontSize || 48 } : n));
+    const created = addNote(template.content, template.image, template.drawingLines, template.color, template.pattern);
+    // Update only the newly created note; never overwrite another note.
+    if (created) setNotes(prev => prev.map(n => n.id === created.id ? { ...n, fontSize: template.fontSize || 48 } : n));
     setIsTemplatesModalOpen(false);
     setIsHeaderMenuOpen(false);
   };
 
   const deleteTemplate = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    setTemplates(templates.filter(t => t.id !== id));
+    setTemplates(prev => prev.filter(t => t.id !== id));
   };
 
   const deleteNote = (id: string, e?: React.MouseEvent) => {
@@ -659,6 +661,10 @@ export default function App() {
     setNotes(notes.filter((n) => n.id !== id));
     if (activeNoteId === id) {
       setActiveNoteId(null);
+      setEditContent('');
+      setIsDrawing(false);
+      setIsEditorMenuOpen(false);
+      setOpenMenuId(null);
       if (window.history.state?.vocalNoteEditor === id) window.history.back();
     }
     setOpenMenuId(null);
@@ -677,20 +683,45 @@ export default function App() {
   const importData = () => {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = '.json';
+    input.accept = '.json,application/json';
     input.onchange = (e: any) => {
-      const file = e.target.files[0];
+      const file = e.target.files?.[0];
+      if (!file) return;
       const reader = new FileReader();
       reader.onload = (re) => {
         try {
-          const data = JSON.parse(re.target?.result as string);
-          if (data.notes) setNotes(data.notes);
-          if (data.templates) setTemplates(data.templates);
+          const data = JSON.parse(String(re.target?.result || ''));
+          if (!data || typeof data !== 'object' || !Array.isArray(data.notes) || !Array.isArray(data.templates)) {
+            throw new Error('Backup must contain notes and templates arrays.');
+          }
+          const validNotes = data.notes.filter((n: any) =>
+            n && typeof n === 'object' && typeof n.id === 'string' && typeof n.content === 'string' &&
+            typeof n.color === 'string' && typeof n.rotation === 'number' &&
+            typeof n.x === 'number' && typeof n.y === 'number'
+          );
+          const validTemplates = data.templates.filter((t: any) =>
+            t && typeof t === 'object' && typeof t.id === 'string' && typeof t.name === 'string' &&
+            typeof t.content === 'string' && typeof t.color === 'string'
+          );
+          if (validNotes.length !== data.notes.length || validTemplates.length !== data.templates.length) {
+            throw new Error('Backup contains invalid note or template records.');
+          }
+          setNotes(validNotes as Note[]);
+          setTemplates(validTemplates as Template[]);
+          setActiveNoteId(null);
+          setIsDrawing(false);
+          setOpenMenuId(null);
+          setIsEditorMenuOpen(false);
+          if (window.history.state?.vocalNoteEditor) window.history.replaceState({}, '', window.location.pathname + window.location.search);
           alert("Storage restored successfully!");
         } catch (err) {
-          alert("Invalid backup file.");
+          console.error('Import validation failed:', err);
+          alert("Invalid backup file. Your existing notes were not changed.");
+        } finally {
+          input.value = '';
         }
       };
+      reader.onerror = () => alert("Unable to read backup file. Your existing notes were not changed.");
       reader.readAsText(file);
     };
     input.click();
@@ -720,14 +751,14 @@ export default function App() {
 
   const toggleComplete = (id: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
-    setNotes(notes.map(n => n.id === id ? { ...n, completed: !n.completed } : n));
+    setNotes(prev => prev.map(n => n.id === id ? { ...n, completed: !n.completed } : n));
     setOpenMenuId(null);
   };
 
   const changeColor = (id: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
     setNotes(
-      notes.map((n) => {
+      prev => prev.map((n) => {
         if (n.id === id) {
           const currentIndex = COLORS.indexOf(n.color);
           const nextIndex = (currentIndex + 1) % COLORS.length;
@@ -1021,6 +1052,16 @@ export default function App() {
   const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      alert('Please select an image file.');
+      event.target.value = '';
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      alert('Image is too large. Please choose an image under 10 MB.');
+      event.target.value = '';
+      return;
+    }
 
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -1055,6 +1096,13 @@ export default function App() {
     e.stopPropagation();
     setOpenMenuId(openMenuId === id ? null : id);
   };
+
+  useEffect(() => {
+    return () => {
+      try { recognitionRef.current?.stop?.(); } catch {}
+      recognitionRef.current = null;
+    };
+  }, []);
 
   const startVoiceRecording = async (target: 'chat' | 'note' = 'chat', e?: React.MouseEvent) => {
     e?.stopPropagation();
@@ -1146,11 +1194,13 @@ export default function App() {
 
     recognition.onend = () => {
       setIsRecording(false);
+      if (recognitionRef.current === recognition) recognitionRef.current = null;
     };
 
     recognition.onerror = (event: any) => {
       console.error("Speech recognition error handle:", event.error);
       setIsRecording(false);
+      if (recognitionRef.current === recognition) recognitionRef.current = null;
       
       if (event.error === 'not-allowed') {
         setMicPermissionStatus('denied');
@@ -1252,7 +1302,11 @@ export default function App() {
     };
 
     const speed = 0.05;
-    const newScale = e.evt.deltaY > 0 ? oldScale * (1 - speed) : oldScale * (1 + speed);
+    const MIN_SCALE = 0.25;
+    const MAX_SCALE = 4;
+    const requestedScale = e.evt.deltaY > 0 ? oldScale * (1 - speed) : oldScale * (1 + speed);
+    const newScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, requestedScale));
+    if (newScale === oldScale) return;
 
     setStageScale(newScale);
     setStagePos({
