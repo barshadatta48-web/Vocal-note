@@ -4,11 +4,9 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Trash2, Edit3, Check, X, Palette, MessageCircle, Send, Sparkles, Loader2, Image as ImageIcon, Camera, MoreVertical, CheckCircle2, Mic, MicOff, Pencil, Eraser, ArrowLeft, Wand2, Bold, Type, Minus, Underline, Hand, Maximize, StickyNote, Download, Upload, Bell, BellOff } from 'lucide-react';
+import { Plus, Trash2, Edit3, Check, X, Palette, MessageCircle, Send, Sparkles, Loader2, Image as ImageIcon, Camera, MoreVertical, CheckCircle2, Mic, MicOff, Pencil, Eraser, ArrowLeft, Wand2, Bold, Type, Minus, Underline, Hand, Maximize, StickyNote, Download, Upload } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { GoogleGenAI } from "@google/genai";
-import { loadOfflineSnapshot, saveOfflineSnapshot } from './offlineStorage';
-import { activatePWAUpdate } from './pwa';
 
 import { Stage, Layer, Line as KonvaLine } from 'react-konva';
 
@@ -368,20 +366,7 @@ function isCaretAtStartOfNode(container: Node, offset: number, rootNode: Node): 
 
 export default function App() {
   const [notes, setNotes] = useState<Note[]>([]);
-  const notesRef = useRef<Note[]>([]);
-  const templatesRef = useRef<Template[]>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
-  const [offlineStorageReady, setOfflineStorageReady] = useState(false);
-  const offlineSaveTimerRef = useRef<number | null>(null);
-  const [deferredInstallPrompt, setDeferredInstallPrompt] = useState<any>(null);
-  const [isAppInstalled, setIsAppInstalled] = useState(false);
-  const [showIosInstallHelp, setShowIosInstallHelp] = useState(false);
-  const [isOnline, setIsOnline] = useState(() => navigator.onLine);
-  const [updateAvailable, setUpdateAvailable] = useState(false);
-  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | 'unsupported'>(
-    typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'unsupported'
-  );
-  const [showNotificationMenu, setShowNotificationMenu] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'board'>('grid');
   const [dashboardColor, setDashboardColor] = useState('#fcfaf7');
   const [isTemplatesModalOpen, setIsTemplatesModalOpen] = useState(false);
@@ -395,9 +380,7 @@ export default function App() {
   const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
   const [activeNoteId, setActiveNoteId] = useState<string | null>(null);
   const activeNoteIdRef = useRef<string | null>(null);
-  const [showLastNoteSummary, setShowLastNoteSummary] = useState(false);
-  const [lastSummaryNoteId, setLastSummaryNoteId] = useState<string | null>(null);
-  const lastLeavingNoteIdRef = useRef<string | null>(null);
+  const notesRef = useRef<Note[]>([]);
   const [editorMode, setEditorMode] = useState<'text' | 'draw'>('text');
   const [drawTool, setDrawTool] = useState<'pen' | 'eraser' | 'pan'>('pen');
   const [drawColor, setDrawColor] = useState('#000000');
@@ -435,239 +418,87 @@ export default function App() {
   const [micPermissionStatus, setMicPermissionStatus] = useState<'granted' | 'denied' | 'prompt' | 'unknown'>('unknown');
   const [micErrorMessage, setMicErrorMessage] = useState<string | null>(null);
 
+  // Keep the original AI Studio data model, with refs only for navigation/save correctness.
+  useEffect(() => { notesRef.current = notes; }, [notes]);
+  useEffect(() => { activeNoteIdRef.current = activeNoteId; }, [activeNoteId]);
+
   // Initialize Gemini
-  const ai = process.env.GEMINI_API_KEY ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY }) : null;
+  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
+  // Load notes and templates from localStorage
   useEffect(() => {
-    if (typeof window === 'undefined' || !('Notification' in window)) return;
-    setNotificationPermission(Notification.permission);
-  }, []);
-
-  useEffect(() => {
-    if (!showNotificationMenu) return;
-
-    const handlePointerDown = (event: MouseEvent) => {
-      const target = event.target as HTMLElement;
-      if (!target.closest('[data-notification-control]')) {
-        setShowNotificationMenu(false);
+    const savedNotes = localStorage.getItem('stickie-notes-rainbow');
+    if (savedNotes) {
+      try {
+        setNotes(JSON.parse(savedNotes));
+      } catch (e) {
+        console.error('Failed to parse notes from local storage', e);
       }
-    };
-
-    document.addEventListener('mousedown', handlePointerDown);
-    return () => document.removeEventListener('mousedown', handlePointerDown);
-  }, [showNotificationMenu]);
-
-  // Install experience, connection status, and service-worker updates.
-  useEffect(() => {
-    const mediaQuery = window.matchMedia('(display-mode: standalone)');
-    const updateInstalledState = () => {
-      const iosStandalone = (window.navigator as any).standalone === true;
-      setIsAppInstalled(mediaQuery.matches || iosStandalone);
-    };
-
-    const handleBeforeInstallPrompt = (event: Event) => {
-      event.preventDefault();
-      setDeferredInstallPrompt(event);
-    };
-
-    const handleAppInstalled = () => {
-      setDeferredInstallPrompt(null);
-      setIsAppInstalled(true);
-    };
-
-    const handleOnline = () => setIsOnline(true);
-    const handleOffline = () => setIsOnline(false);
-
-    updateInstalledState();
-    setIsOnline(navigator.onLine);
-    mediaQuery.addEventListener?.('change', updateInstalledState);
-    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-    window.addEventListener('appinstalled', handleAppInstalled);
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-
-    return () => {
-      mediaQuery.removeEventListener?.('change', updateInstalledState);
-      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-      window.removeEventListener('appinstalled', handleAppInstalled);
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!import.meta.env.PROD || !('serviceWorker' in navigator)) return;
-
-    navigator.serviceWorker.ready.then((registration) => {
-      if (registration.waiting) setUpdateAvailable(true);
-
-      registration.addEventListener('updatefound', () => {
-        const worker = registration.installing;
-        if (!worker) return;
-        worker.addEventListener('statechange', () => {
-          if (worker.state === 'installed' && navigator.serviceWorker.controller) {
-            setUpdateAvailable(true);
-          }
-        });
-      });
-    });
-  }, []);
-
-  const isIosDevice = /iphone|ipad|ipod/i.test(window.navigator.userAgent);
-  const canInstallApp = !isAppInstalled && (!!deferredInstallPrompt || isIosDevice);
-
-  const installApp = async () => {
-    if (deferredInstallPrompt) {
-      deferredInstallPrompt.prompt();
-      const choice = await deferredInstallPrompt.userChoice;
-      if (choice?.outcome === 'accepted') setIsAppInstalled(true);
-      setDeferredInstallPrompt(null);
-      return;
     }
-
-    if (isIosDevice) setShowIosInstallHelp(true);
-  };
-
-  const getLastNoteSummary = (note?: Note) => {
-    if (!note) return 'You have no notes yet.';
-    const plainText = note.content
-      .replace(/<br\s*\/?>/gi, ' ')
-      .replace(/<[^>]*>/g, ' ')
-      .replace(/&nbsp;/gi, ' ')
-      .replace(/&amp;/gi, '&')
-      .replace(/\s+/g, ' ')
-      .trim();
-
-    if (!plainText) return 'Your latest note is empty.';
-    const sentences = plainText.split(/(?<=[.!?])\s+/).filter(Boolean);
-    const summary = sentences.slice(0, 2).join(' ');
-    return (summary || plainText).slice(0, 180) + ((summary || plainText).length > 180 ? '…' : '');
-  };
-
-  const requestNoteNotifications = async () => {
-    if (!('Notification' in window)) {
-      setNotificationPermission('unsupported');
-      return;
-    }
-
-    const permission = await Notification.requestPermission();
-    setNotificationPermission(permission);
-
-    if (permission === 'granted') {
-      const lastNote = notes[0];
-      new Notification('Vocal Note — Latest Note', {
-        body: getLastNoteSummary(lastNote),
-        icon: '/icon.svg',
-        tag: 'vocal-note-latest-summary'
-      });
-    }
-  };
-
-  const notifyLatestNote = () => {
-    if (!('Notification' in window) || Notification.permission !== 'granted') {
-      setShowNotificationMenu(true);
-      return;
-    }
-
-    const lastNote = notes[0];
-    new Notification('Vocal Note — Latest Note', {
-      body: getLastNoteSummary(lastNote),
-      icon: '/icon.svg',
-      tag: 'vocal-note-latest-summary'
-    });
-  };
-
-  // Load notes and templates from durable offline storage.
-  // IndexedDB is the primary store; existing localStorage data is migrated once.
-  useEffect(() => {
-    let cancelled = false;
-
-    const load = async () => {
-      const snapshot = await loadOfflineSnapshot();
-      if (cancelled) return;
-
-      if (snapshot) {
-        setNotes(snapshot.notes as Note[]);
-        setTemplates(snapshot.templates as Template[]);
+    const savedTemplates = localStorage.getItem('stickie-templates-rainbow');
+    if (savedTemplates) {
+      try {
+        setTemplates(JSON.parse(savedTemplates));
+      } catch (e) {
+        console.error('Failed to parse templates', e);
       }
+    }
 
-      setOfflineStorageReady(true);
+    // Auto-popup AI assistant for new users
+    const hasVisited = localStorage.getItem('vocal-note-visited');
+    if (!hasVisited) {
+      setTimeout(() => {
+        const welcomeId = Date.now().toString();
+        const welcomeNote: Note = {
+          id: welcomeId,
+          content: `
+            <h1 style="font-size: 1.5em; font-weight: 900; margin-bottom: 0.5em;">Welcome to Vocal Note! 🎤</h1>
+            <p>Your premium space for voice-captured thoughts. Try these features:</p>
+            <ul style="margin-top: 1em; list-style-type: disc; padding-left: 1.5em;">
+              <li><b>Voice Dictation:</b> Hit the mic and start talking.</li>
+              <li><b>AI Assistant:</b> Brainstorm ideas right in the chat.</li>
+              <li><b>Sketch Mode:</b> Draw your visions with the pencil tool.</li>
+            </ul>
+            <p style="margin-top: 1em; font-style: italic; opacity: 0.7;">Feel free to delete this note or make it your own!</p>
+          `,
+          color: 'bg-note-indigo',
+          rotation: -1 + Math.random() * 2,
+          x: 100,
+          y: 100,
+        };
+        setNotes(prev => [welcomeNote, ...prev]);
+        setActiveNoteId(welcomeId);
+        setEditContent(welcomeNote.content);
+        setEditFontSize(48);
+        setIsChatOpen(true);
+        localStorage.setItem('vocal-note-visited', 'true');
+      }, 1000); // Small delay to let the UI settle
+    }
 
-      const hasVisited = localStorage.getItem('vocal-note-visited');
-      if (!hasVisited && !(snapshot?.notes?.length)) {
-        setTimeout(() => {
-          const welcomeId = Date.now().toString();
-          const welcomeNote: Note = {
-            id: welcomeId,
-            content: `<h1 style="font-size: 1.5em; font-weight: 900; margin-bottom: 0.5em;">Welcome to Vocal Note! 🎤</h1><p>Your premium space for voice-captured thoughts. Try these features:</p><ul style="margin-top: 1em; list-style-type: disc; padding-left: 1.5em;"><li><b>Voice Dictation:</b> Hit the mic and start talking.</li><li><b>AI Assistant:</b> Brainstorm ideas right in the chat.</li><li><b>Sketch Mode:</b> Draw your visions with the pencil tool.</li></ul><p style="margin-top: 1em; font-style: italic; opacity: 0.7;">Feel free to delete this note or make it your own!</p>`,
-            color: 'bg-note-indigo', rotation: -1 + Math.random() * 2, x: 100, y: 100,
-          };
-          setNotes(prev => [welcomeNote, ...prev]);
-          setActiveNoteId(welcomeId);
-          setEditContent(welcomeNote.content);
-          setEditFontSize(48);
-          setIsChatOpen(true);
-          localStorage.setItem('vocal-note-visited', 'true');
-        }, 1000);
-      }
-
-      if (navigator.permissions && navigator.permissions.query) {
-        navigator.permissions.query({ name: 'microphone' as any }).then(result => {
+    // Check microphone permission status initially
+    if (navigator.permissions && navigator.permissions.query) {
+      navigator.permissions.query({ name: 'microphone' as any }).then(result => {
+        setMicPermissionStatus(result.state);
+        result.onchange = () => {
           setMicPermissionStatus(result.state);
-          result.onchange = () => setMicPermissionStatus(result.state);
-        }).catch(err => console.warn("Permissions API not fully supported for microphone query:", err));
-      } else {
-        setMicPermissionStatus('prompt');
-      }
-    };
-
-    load().catch((error) => {
-      console.error('Failed to initialize offline storage:', error);
-      setOfflineStorageReady(true);
-    });
-
-    return () => { cancelled = true; };
+        };
+      }).catch(err => {
+        console.warn("Permissions API not fully supported for microphone query:", err);
+      });
+    } else {
+      // Fallback for browsers that don't support permissions.query
+      setMicPermissionStatus('prompt');
+    }
   }, []);
 
-  // Keep a current notes reference for navigation/event handlers without
-  // re-registering browser history listeners every time a note is edited.
+  // Save to localStorage
   useEffect(() => {
-    notesRef.current = notes;
-    templatesRef.current = templates;
-  }, [notes, templates]);
-  
-  useEffect(() => {
-    activeNoteIdRef.current = activeNoteId;
-  }, [activeNoteId]);
-
-  // Persist the complete workspace after every change. IndexedDB keeps the
-  // workspace available even when the browser is offline or localStorage is full.
-  useEffect(() => {
-    if (!offlineStorageReady) return;
-
-    if (offlineSaveTimerRef.current !== null) {
-      window.clearTimeout(offlineSaveTimerRef.current);
-    }
-
-    offlineSaveTimerRef.current = window.setTimeout(() => {
-      void saveOfflineSnapshot(notesRef.current, templatesRef.current);
-      offlineSaveTimerRef.current = null;
-    }, 250);
-
-    return () => {
-      if (offlineSaveTimerRef.current !== null) {
-        window.clearTimeout(offlineSaveTimerRef.current);
-        offlineSaveTimerRef.current = null;
-      }
-    };
-  }, [notes, templates, offlineStorageReady]);
+    localStorage.setItem('stickie-notes-rainbow', JSON.stringify(notes));
+  }, [notes]);
 
   useEffect(() => {
-    if (!offlineStorageReady) return;
-    const flush = () => { void saveOfflineSnapshot(notesRef.current, templatesRef.current); };
-    window.addEventListener('pagehide', flush);
-    return () => window.removeEventListener('pagehide', flush);
-  }, [offlineStorageReady]);
+    localStorage.setItem('stickie-templates-rainbow', JSON.stringify(templates));
+  }, [templates]);
 
   useEffect(() => {
     localStorage.setItem('rainbow-notepad-view-mode', viewMode);
@@ -695,88 +526,10 @@ export default function App() {
 
   useEffect(() => {
     if (editorRef.current && activeNoteId) {
-      if (editorRef.current.innerHTML !== editContent) {
-        editorRef.current.innerHTML = editContent;
-      }
+      editorRef.current.innerHTML = editContent;
       normalizeEditorUnderlines(editorRef.current);
     }
-  }, [activeNoteId, editContent]);
-
-  // Browser history is the single source of truth for dashboard/note navigation.
-  // There is exactly one dashboard entry and one entry per opened note.
-  useEffect(() => {
-    if (!offlineStorageReady) return;
-
-    const readHistoryNoteId = (): string | null => {
-      const state = window.history.state;
-      return typeof state?.vocalNoteEditor === 'string' ? state.vocalNoteEditor : null;
-    };
-
-    const showDashboard = (showSummary = true) => {
-      const leavingNoteId = activeNoteIdRef.current;
-      setActiveNoteId(null);
-      setIsDrawing(false);
-      setIsChatOpen(false);
-      setIsEditorMenuOpen(false);
-      setOpenMenuId(null);
-      setStageScale(1);
-      setStagePos({ x: 0, y: 0 });
-
-      if (showSummary && leavingNoteId && notesRef.current.some(n => n.id === leavingNoteId)) {
-        setLastSummaryNoteId(leavingNoteId);
-        setShowLastNoteSummary(true);
-      }
-      lastLeavingNoteIdRef.current = null;
-    };
-
-    const restoreFromHistory = () => {
-      const noteId = readHistoryNoteId();
-      if (!noteId) {
-        showDashboard(true);
-        return;
-      }
-
-      const note = notesRef.current.find(n => n.id === noteId);
-      if (!note) {
-        window.history.replaceState({ vocalNoteList: true }, '', window.location.pathname + window.location.search);
-        showDashboard(false);
-        return;
-      }
-
-      lastLeavingNoteIdRef.current = null;
-      setShowLastNoteSummary(false);
-      setLastSummaryNoteId(null);
-      setActiveNoteId(note.id);
-      setIsDrawing(false);
-      setIsChatOpen(false);
-      setEditContent(note.content);
-      setEditFontSize(note.fontSize || 48);
-      setIsEditorMenuOpen(false);
-      setOpenMenuId(null);
-      setStageScale(1);
-      setStagePos({ x: 0, y: 0 });
-    };
-
-    const existingNoteId = readHistoryNoteId();
-    if (existingNoteId) {
-      const note = notesRef.current.find(n => n.id === existingNoteId);
-      if (note) restoreFromHistory();
-      else window.history.replaceState({ vocalNoteList: true }, '', window.location.pathname + window.location.search);
-    } else if (!window.history.state?.vocalNoteList) {
-      const legacyHash = window.location.hash.match(/^#note-(.+)$/)?.[1];
-      const legacyNoteId = legacyHash ? decodeURIComponent(legacyHash) : null;
-      const note = legacyNoteId ? notesRef.current.find(n => n.id === legacyNoteId) : null;
-      if (note) {
-        window.history.replaceState({ vocalNoteEditor: note.id }, '', '#note-' + encodeURIComponent(note.id));
-        restoreFromHistory();
-      } else {
-        window.history.replaceState({ vocalNoteList: true }, '', window.location.pathname + window.location.search);
-      }
-    }
-
-    window.addEventListener('popstate', restoreFromHistory);
-    return () => window.removeEventListener('popstate', restoreFromHistory);
-  }, [offlineStorageReady]);
+  }, [activeNoteId]);
 
   // Handle outside clicks to close menus
   useEffect(() => {
@@ -788,29 +541,60 @@ export default function App() {
     return () => window.removeEventListener('click', handleClickOutside);
   }, []);
 
-  const openNote = (noteId: string) => {
-    const note = notesRef.current.find(n => n.id === noteId);
-    if (!note) return;
+  // Single-note navigation: dashboard is the base entry, each opened note is one history entry.
+  useEffect(() => {
+    const restoreFromHistory = () => {
+      const noteId = window.history.state?.vocalNoteEditor as string | undefined;
+      if (!noteId) {
+        setActiveNoteId(null);
+        setIsDrawing(false);
+        setIsEditorMenuOpen(false);
+        return;
+      }
+      const note = notesRef.current.find(n => n.id === noteId);
+      if (!note) {
+        setActiveNoteId(null);
+        setIsDrawing(false);
+        setIsEditorMenuOpen(false);
+        window.history.replaceState({}, '', window.location.pathname + window.location.search);
+        return;
+      }
+      setActiveNoteId(note.id);
+      setIsDrawing(false);
+      setEditContent(note.content);
+      setEditFontSize(note.fontSize || 48);
+      setIsEditorMenuOpen(false);
+      setStageScale(1);
+      setStagePos({ x: 0, y: 0 });
+    };
+    const initialHash = window.location.hash.match(/^#note-(.+)$/);
+    if (initialHash && !window.history.state?.vocalNoteEditor) {
+      const noteId = decodeURIComponent(initialHash[1]);
+      window.history.replaceState({ vocalNoteEditor: noteId }, '', window.location.href);
+    } else if (!window.history.state?.vocalNoteEditor) {
+      window.history.replaceState({}, '', window.location.href);
+    }
+    window.addEventListener('popstate', restoreFromHistory);
+    restoreFromHistory();
+    return () => window.removeEventListener('popstate', restoreFromHistory);
+  }, []);
 
-    lastLeavingNoteIdRef.current = null;
-    setShowLastNoteSummary(false);
-    setLastSummaryNoteId(null);
+  const openNote = (note: Note) => {
     setActiveNoteId(note.id);
     setIsDrawing(false);
-    setIsChatOpen(false);
     setEditContent(note.content);
     setEditFontSize(note.fontSize || 48);
     setOpenMenuId(null);
     setIsEditorMenuOpen(false);
     setStageScale(1);
     setStagePos({ x: 0, y: 0 });
-
-    if (window.history.state?.vocalNoteEditor !== note.id) {
+    const currentId = window.history.state?.vocalNoteEditor as string | undefined;
+    if (currentId !== note.id) {
       window.history.pushState({ vocalNoteEditor: note.id }, '', '#note-' + encodeURIComponent(note.id));
     }
   };
 
-  const addNote = (content = '', image?: string, drawingLines?: DrawingLine[], color?: string, pattern?: string): string => {
+  const addNote = (content = '', image?: string, drawingLines?: DrawingLine[], color?: string, pattern?: string) => {
     const notePatterns = PATTERNS.filter(p => p !== 'none');
     const newNote: Note = {
       id: crypto.randomUUID(),
@@ -825,21 +609,13 @@ export default function App() {
       y: 50 + (notes.length * 40) % 400,
       fontSize: 48,
     };
-    // Every note opens immediately in the dedicated single-page editor.
-    // Use a functional update so the new note is never lost if state updates are batched.
-    lastLeavingNoteIdRef.current = null;
-    setShowLastNoteSummary(false);
-    setNotes(prev => [newNote, ...prev]);
-    setIsDrawing(false);
-    setEditContent(content);
-    setEditFontSize(newNote.fontSize || 48);
-    setOpenMenuId(null);
-    setIsEditorMenuOpen(false);
-    setStageScale(1);
-    setStagePos({ x: 0, y: 0 });
-    window.history.pushState({ vocalNoteEditor: newNote.id }, '', '#note-' + encodeURIComponent(newNote.id));
-    setActiveNoteId(newNote.id);
-    return newNote.id;
+    setNotes([newNote, ...notes]);
+    if (!content && !image && !drawingLines) {
+      window.history.pushState({ vocalNoteEditor: newNote.id }, '', '#note-' + encodeURIComponent(newNote.id));
+      setActiveNoteId(newNote.id);
+      setIsDrawing(false);
+      setEditContent('');
+    }
   };
 
   const updateNotePosition = (id: string, x: number, y: number) => {
@@ -860,39 +636,32 @@ export default function App() {
       image: note.image,
       fontSize: note.fontSize,
     };
-    setTemplates(prev => [...prev, newTemplate]);
+    setTemplates([...templates, newTemplate]);
     setOpenMenuId(null);
     setIsEditorMenuOpen(false);
   };
 
   const applyTemplate = (template: Template) => {
-    const newNoteId = addNote(template.content, template.image, template.drawingLines, template.color, template.pattern);
-    setNotes(prev => prev.map(n => n.id === newNoteId ? { ...n, fontSize: template.fontSize || 48 } : n));
+    addNote(template.content, template.image, template.drawingLines, template.color, template.pattern);
+    // Explicitly set font styling after adding if available
+    setNotes(prev => prev.map((n, i) => i === 0 ? { ...n, fontSize: template.fontSize || 48 } : n));
     setIsTemplatesModalOpen(false);
     setIsHeaderMenuOpen(false);
   };
 
   const deleteTemplate = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    setTemplates(prev => prev.filter(t => t.id !== id));
+    setTemplates(templates.filter(t => t.id !== id));
   };
 
   const deleteNote = (id: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
-    const deletingActiveNote = activeNoteId === id;
-    if (deletingActiveNote) {
-      lastLeavingNoteIdRef.current = null;
-      setShowLastNoteSummary(false);
-    }
-    setNotes(prev => prev.filter(n => n.id !== id));
-    setOpenMenuId(null);
-    if (deletingActiveNote) {
-      setIsEditorMenuOpen(false);
-      setIsDrawing(false);
-      setIsChatOpen(false);
+    setNotes(notes.filter((n) => n.id !== id));
+    if (activeNoteId === id) {
+      setActiveNoteId(null);
       if (window.history.state?.vocalNoteEditor === id) window.history.back();
-      else setActiveNoteId(null);
     }
+    setOpenMenuId(null);
   };
 
   const exportData = () => {
@@ -915,36 +684,8 @@ export default function App() {
       reader.onload = (re) => {
         try {
           const data = JSON.parse(re.target?.result as string);
-          const importedNotes = Array.isArray(data?.notes)
-            ? data.notes
-                .filter((note: any) => note && typeof note === 'object' && typeof note.id === 'string' && typeof note.content === 'string')
-                .map((note: any) => ({
-                  ...note,
-                  color: typeof note.color === 'string' ? note.color : COLORS[0],
-                  rotation: typeof note.rotation === 'number' ? note.rotation : 0,
-                  x: typeof note.x === 'number' ? note.x : 50,
-                  y: typeof note.y === 'number' ? note.y : 50,
-                  fontSize: typeof note.fontSize === 'number' ? note.fontSize : 48,
-                }))
-            : null;
-          const importedTemplates = Array.isArray(data?.templates)
-            ? data.templates
-                .filter((template: any) => template && typeof template === 'object' && typeof template.id === 'string' && typeof template.name === 'string' && typeof template.content === 'string')
-                .map((template: any) => ({
-                  ...template,
-                  color: typeof template.color === 'string' ? template.color : COLORS[0],
-                  fontSize: typeof template.fontSize === 'number' ? template.fontSize : 48,
-                }))
-            : null;
-          if (!importedNotes && !importedTemplates) throw new Error('Invalid backup structure');
-          if (importedNotes) setNotes(importedNotes);
-          if (importedTemplates) setTemplates(importedTemplates);
-          lastLeavingNoteIdRef.current = null;
-          setShowLastNoteSummary(false);
-          setActiveNoteId(null);
-          setIsDrawing(false);
-          setIsChatOpen(false);
-          window.history.replaceState({ vocalNoteList: true }, '', window.location.pathname + window.location.search);
+          if (data.notes) setNotes(data.notes);
+          if (data.templates) setTemplates(data.templates);
           alert("Storage restored successfully!");
         } catch (err) {
           alert("Invalid backup file.");
@@ -957,74 +698,36 @@ export default function App() {
 
   const startEditing = (note: Note, e?: React.MouseEvent) => {
     e?.stopPropagation();
-    openNote(note.id);
-    setIsDrawing(false);
-    setEditContent(note.content);
-    setEditFontSize(note.fontSize || 48);
-    setOpenMenuId(null);
-    setIsEditorMenuOpen(false);
-    
-    // Reset canvas view
-    setStageScale(1);
-    setStagePos({ x: 0, y: 0 });
+    openNote(note);
   };
 
   const startDrawing = (note: Note, e?: React.MouseEvent) => {
     e?.stopPropagation();
-    openNote(note.id);
+    openNote(note);
     setIsDrawing(true);
-    setIsDrawing(true);
-    setEditContent(note.content);
-    setEditFontSize(note.fontSize || 48);
-    setOpenMenuId(null);
-    setIsEditorMenuOpen(false);
-    
-    // Reset canvas view
-    setStageScale(1);
-    setStagePos({ x: 0, y: 0 });
   };
 
   const saveNote = () => {
-    if (!activeNoteId) return;
-
-    const noteId = activeNoteId;
+    const id = activeNoteIdRef.current;
+    if (!id) return;
     const latestContent = editorRef.current?.innerHTML ?? editContent;
-    lastLeavingNoteIdRef.current = noteId;
     setEditContent(latestContent);
-    setNotes(prev =>
-      prev.map(n =>
-        n.id === noteId ? { ...n, content: latestContent, fontSize: editFontSize } : n
-      )
-    );
+    setNotes(prev => prev.map(n => n.id === id ? { ...n, content: latestContent, fontSize: editFontSize } : n));
     setIsEditorMenuOpen(false);
-
-    // Return to the dashboard through the dedicated note history entry.
-    // This preserves normal Back/Forward semantics and lets popstate perform
-    // the single, centralized editor cleanup.
-    if (window.history.state?.vocalNoteEditor === noteId) {
-      window.history.back();
-      return;
-    }
-
-    // Fallback for an editor opened before history initialization completed.
-    setActiveNoteId(null);
-    setIsDrawing(false);
-    setIsChatOpen(false);
-    setLastSummaryNoteId(noteId);
-    setShowLastNoteSummary(true);
-    lastLeavingNoteIdRef.current = null;
+    if (window.history.state?.vocalNoteEditor === id) window.history.back();
+    else setActiveNoteId(null);
   };
 
   const toggleComplete = (id: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
-    setNotes(prev => prev.map(n => n.id === id ? { ...n, completed: !n.completed } : n));
+    setNotes(notes.map(n => n.id === id ? { ...n, completed: !n.completed } : n));
     setOpenMenuId(null);
   };
 
   const changeColor = (id: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
     setNotes(
-      prev => prev.map((n) => {
+      notes.map((n) => {
         if (n.id === id) {
           const currentIndex = COLORS.indexOf(n.color);
           const nextIndex = (currentIndex + 1) % COLORS.length;
@@ -1137,19 +840,6 @@ export default function App() {
   };
 
   const handleEditorKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    // Enter finishes the current note and returns to the dashboard.
-    // Shift+Enter is intentionally also treated as finish so Enter never inserts a new line.
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      e.stopPropagation();
-      if (isRecording) {
-        try { recognitionRef.current?.stop(); } catch {}
-        setIsRecording(false);
-      }
-      saveNote();
-      return;
-    }
-
     // 1. Keyboard shortcuts: Ctrl+U / Cmd+U, Ctrl+B / Cmd+B
     if ((e.ctrlKey || e.metaKey) && (e.key === 'u' || e.key === 'U')) {
       e.preventDefault();
@@ -1165,6 +855,13 @@ export default function App() {
     // Navigation keys: caret moved, reset keepUnderlineActiveRef
     if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown', 'Escape'].includes(e.key)) {
       keepUnderlineActiveRef.current = false;
+      return;
+    }
+
+    if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault();
+      if (isRecording) recognitionRef.current?.stop();
+      saveNote();
       return;
     }
 
@@ -1298,8 +995,6 @@ export default function App() {
         ? "Generate a creative and structured note template. Return HTML content."
         : `Continue or enhance this note content: "${editContent || 'Ideas for the week'}"`;
 
-      if (!ai) throw new Error('Gemini API key is not configured.');
-
       const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
         contents: prompt,
@@ -1360,16 +1055,6 @@ export default function App() {
     e.stopPropagation();
     setOpenMenuId(openMenuId === id ? null : id);
   };
-
-  useEffect(() => {
-    return () => {
-      const recognition = recognitionRef.current;
-      if (recognition) {
-        try { recognition.stop(); } catch {}
-      }
-      recognitionRef.current = null;
-    };
-  }, []);
 
   const startVoiceRecording = async (target: 'chat' | 'note' = 'chat', e?: React.MouseEvent) => {
     e?.stopPropagation();
@@ -1567,8 +1252,7 @@ export default function App() {
     };
 
     const speed = 0.05;
-    const rawScale = e.evt.deltaY > 0 ? oldScale * (1 - speed) : oldScale * (1 + speed);
-    const newScale = Math.min(4, Math.max(0.25, rawScale));
+    const newScale = e.evt.deltaY > 0 ? oldScale * (1 - speed) : oldScale * (1 + speed);
 
     setStageScale(newScale);
     setStagePos({
@@ -1626,8 +1310,7 @@ export default function App() {
         y: (newCenter.y - currPos.y) / currScale,
       };
 
-      const rawScale = currScale * (dist / lastDist);
-      const newScale = Math.min(4, Math.max(0.25, rawScale));
+      const newScale = currScale * (dist / lastDist);
 
       setStageScale(newScale);
       setStagePos({
@@ -1661,11 +1344,6 @@ export default function App() {
 
   const handleSendMessage = async () => {
     if (!chatInput.trim() || isLoading) return;
-    if (!ai) {
-      setMessages(prev => [...prev, { role: 'assistant', content: 'AI Assistant is unavailable because the Gemini API key is not configured.' }]);
-      setChatInput('');
-      return;
-    }
 
     const userMessage = chatInput.trim();
     setChatInput('');
@@ -1732,7 +1410,7 @@ export default function App() {
         className="hidden"
       />
 
-      <header className="fixed top-0 left-0 right-0 z-[2000] px-4 md:px-[50px] py-4 md:py-[20px] flex items-center justify-between bg-premium-header shadow-sm overflow-visible min-h-[72px] md:min-h-0">
+      <header className="fixed top-0 left-0 right-0 z-50 px-4 md:px-[50px] py-4 md:py-[20px] flex items-center justify-between bg-premium-header shadow-sm overflow-hidden min-h-[72px] md:min-h-0">
         {/* Subtle Rainbow Detail */}
         <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 opacity-20" />
         
@@ -1838,74 +1516,6 @@ export default function App() {
 
           <div className="hidden md:block h-4 w-px bg-black/10 mx-1" />
 
-          <div className="relative" data-notification-control>
-            <button
-              type="button"
-              onClick={() => {
-                if (notificationPermission === 'granted') {
-                  notifyLatestNote();
-                } else {
-                  setShowNotificationMenu(prev => !prev);
-                }
-              }}
-              className="relative flex h-10 w-10 md:h-11 md:w-11 items-center justify-center rounded-full border border-black/10 bg-white/80 text-slate-500 shadow-sm backdrop-blur transition-all hover:-translate-y-0.5 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-600 hover:shadow-md active:translate-y-0"
-              title={notificationPermission === 'granted' ? 'Show latest note summary' : 'Enable note notifications'}
-              aria-label={notificationPermission === 'granted' ? 'Show latest note summary' : 'Enable note notifications'}
-            >
-              {notificationPermission === 'granted' ? <Bell size={19} strokeWidth={2.2} /> : <BellOff size={19} strokeWidth={2.2} />}
-              {notificationPermission !== 'granted' && notificationPermission !== 'unsupported' && (
-                <span className="absolute right-0.5 top-0.5 h-2.5 w-2.5 rounded-full border-2 border-white bg-indigo-600" aria-hidden="true" />
-              )}
-            </button>
-
-            {showNotificationMenu && (
-              <div className="absolute right-0 top-[calc(100%+10px)] z-[1000] w-[min(20rem,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-black/10 bg-white shadow-2xl">
-                <div className="h-1 bg-indigo-600" />
-                <div className="p-4">
-                  <div className="flex items-start gap-3">
-                    <div className="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
-                      <Bell size={17} />
-                    </div>
-                    <div>
-                      <p className="text-sm font-black text-slate-800">Latest Note Notifications</p>
-                      <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                        Get a short summary of your latest note as a browser notification.
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={requestNoteNotifications}
-                    className="mt-4 w-full px-4 py-2.5 rounded-xl bg-indigo-600 text-white text-[11px] font-black uppercase tracking-widest hover:bg-indigo-700 transition-colors"
-                  >
-                    {notificationPermission === 'denied' ? 'Allow in Browser Settings' : 'Enable Notifications'}
-                  </button>
-                  {notificationPermission === 'granted' && (
-                    <button
-                      type="button"
-                      onClick={notifyLatestNote}
-                      className="mt-2 w-full px-4 py-2.5 rounded-xl bg-slate-100 text-slate-700 text-[11px] font-black uppercase tracking-widest hover:bg-slate-200 transition-colors"
-                    >
-                      Summarise Last Note
-                    </button>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {canInstallApp && (
-            <button
-              onClick={installApp}
-              className="p-2 md:px-4 md:py-2.5 bg-teal-600 text-white rounded-xl md:rounded-2xl hover:bg-teal-700 transition-all shadow-sm flex items-center gap-2"
-              title="Install Vocal Note"
-              aria-label="Install Vocal Note"
-            >
-              <Download size={18} />
-              <span className="hidden md:inline text-[10px] font-black uppercase tracking-widest">Install</span>
-            </button>
-          )}
-
           {/* Storage Buttons - Hide on very small screens or group */}
           <div className="hidden sm:flex items-center gap-1">
             <button
@@ -1942,69 +1552,10 @@ export default function App() {
             <span className="md:hidden">ADD</span>
           </button>
         </div>
-        {(!isOnline || updateAvailable) && (
-          <div className="absolute top-full left-0 right-0 flex justify-center pointer-events-none px-4 pt-2">
-            {!isOnline ? (
-              <div className="pointer-events-auto px-4 py-2 rounded-full bg-amber-100 text-amber-800 border border-amber-200 shadow-sm text-[11px] font-bold">
-                Offline mode — your notes are saved on this device.
-              </div>
-            ) : (
-              <button
-                onClick={() => { activatePWAUpdate(); setUpdateAvailable(false); }}
-                className="pointer-events-auto px-4 py-2 rounded-full bg-indigo-600 text-white shadow-lg text-[11px] font-black hover:bg-indigo-700 transition-colors"
-              >
-                New version available — Update
-              </button>
-            )}
-          </div>
-        )}
       </header>
 
 
-      <AnimatePresence>
-        {showIosInstallHelp && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[200] bg-black/30 backdrop-blur-sm flex items-center justify-center p-4"
-            onClick={() => setShowIosInstallHelp(false)}
-          >
-            <motion.div
-              initial={{ opacity: 0, y: 16, scale: 0.98 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 16, scale: 0.98 }}
-              onClick={(e) => e.stopPropagation()}
-              className="w-full max-w-sm bg-white rounded-3xl shadow-2xl border border-black/10 p-6 text-slate-700"
-            >
-              <div className="flex items-center justify-between mb-5">
-                <div>
-                  <h2 className="text-lg font-black">Install Vocal Note</h2>
-                  <p className="text-xs text-slate-400 mt-1">Add it to your iPhone/iPad Home Screen.</p>
-                </div>
-                <button onClick={() => setShowIosInstallHelp(false)} className="p-2 rounded-full hover:bg-black/5" aria-label="Close">
-                  <X size={18} />
-                </button>
-              </div>
-              <ol className="space-y-3 text-sm font-medium">
-                <li><span className="font-black">1.</span> Open Vocal Note in Safari.</li>
-                <li><span className="font-black">2.</span> Tap the <strong>Share</strong> button.</li>
-                <li><span className="font-black">3.</span> Choose <strong>Add to Home Screen</strong>.</li>
-                <li><span className="font-black">4.</span> Tap <strong>Add</strong> to finish.</li>
-              </ol>
-              <button
-                onClick={() => setShowIosInstallHelp(false)}
-                className="mt-6 w-full py-3 bg-indigo-600 text-white rounded-2xl font-black text-sm"
-              >
-                Done
-              </button>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      <main className={`mx-auto pt-[100px] md:pt-[140px] pb-12 relative z-10 ${viewMode === 'grid' ? 'max-w-[1600px] px-4 md:px-8' : 'w-full min-h-[2000px]'}`} data-note-dashboard>
-
+      <main className={`mx-auto pt-[100px] md:pt-[140px] pb-12 relative z-10 ${viewMode === 'grid' ? 'max-w-[1600px] px-4 md:px-8' : 'w-full min-h-[2000px]'}`}>
         {notes.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 md:py-32 text-slate-400">
             <div className="p-6 md:p-8 rounded-full bg-white shadow-inner mb-6 border border-black/5">
@@ -2038,15 +1589,6 @@ export default function App() {
                   whileHover={{ scale: 1.02, zIndex: 10, y: viewMode === 'grid' ? -8 : (note.y - 8), transition: { duration: 0.2 } }}
                   whileDrag={{ scale: 1.1, zIndex: 100, boxShadow: "0 40px 80px rgba(0,0,0,0.2)" }}
                   onClick={() => startEditing(note)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      startEditing(note);
-                    }
-                  }}
-                  tabIndex={0}
-                  role="button"
-                  aria-label="Open note"
                   style={viewMode === 'board' ? { position: 'absolute', top: 0, left: 0 } : {}}
                   className={`
                     relative min-h-[300px] md:min-h-[380px] p-6 md:p-[30px] flex flex-col items-start
@@ -2431,15 +1973,6 @@ export default function App() {
                       }
                       const html = target.innerHTML;
                       setEditContent(html);
-                      // Persist the active draft immediately through the notes state.
-                      // This prevents data loss if the app is closed before Save & Close.
-                      if (activeNoteId) {
-                        setNotes(prev => prev.map(n =>
-                          n.id === activeNoteId
-                            ? { ...n, content: html, fontSize: editFontSize }
-                            : n
-                        ));
-                      }
                       checkSelection();
                     }}
                     onSelect={checkSelection}
@@ -2637,81 +2170,6 @@ export default function App() {
 
             </div>
           </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Automatic last-note summary shown when returning to the dashboard */}
-      <AnimatePresence>
-        {showLastNoteSummary && lastSummaryNoteId && (
-          <div className="fixed inset-0 z-[1200] flex items-center justify-center p-5 md:p-8">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowLastNoteSummary(false)}
-              className="absolute inset-0 bg-black/45 backdrop-blur-md"
-            />
-            <motion.div
-              initial={{ opacity: 0, y: 24, scale: 0.96 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 16, scale: 0.97 }}
-              className="relative w-full max-w-xl overflow-hidden rounded-[28px] bg-white shadow-2xl border border-black/5"
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="last-note-summary-title"
-            >
-              {(() => {
-                const summaryNote = notes.find(n => n.id === lastSummaryNoteId);
-                if (!summaryNote) return null;
-                return (
-                  <>
-                    <div className="px-6 md:px-8 pt-7 pb-5 border-b border-black/5">
-                      <div className="flex items-start justify-between gap-4">
-                        <div>
-                          <p className="text-[10px] font-black uppercase tracking-[0.25em] text-indigo-500 mb-2">Back on Dashboard</p>
-                          <h2 id="last-note-summary-title" className="text-xl md:text-2xl font-black tracking-tight text-slate-900">Last Note Summary</h2>
-                        </div>
-                        <button
-                          onClick={() => setShowLastNoteSummary(false)}
-                          className="p-2 rounded-full hover:bg-slate-100 transition-colors"
-                          aria-label="Close summary"
-                        >
-                          <X size={18} />
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="p-6 md:p-8">
-                      <div className={`rounded-2xl p-5 md:p-6 ${summaryNote.color} ${summaryNote.pattern && summaryNote.pattern !== 'none' ? summaryNote.pattern : ''}`}>
-                        <p className="text-[10px] font-black uppercase tracking-[0.2em] opacity-40 mb-3">Saved note</p>
-                        <div
-                          className="note-content text-base md:text-lg leading-relaxed text-slate-800"
-                          dangerouslySetInnerHTML={{ __html: getLastNoteSummary(summaryNote) }}
-                        />
-                      </div>
-                      <div className="mt-5 flex gap-3">
-                        <button
-                          onClick={() => setShowLastNoteSummary(false)}
-                          className="flex-1 py-3 rounded-xl bg-slate-900 text-white font-black text-[10px] uppercase tracking-widest hover:bg-slate-800 transition-colors"
-                        >
-                          Continue
-                        </button>
-                        <button
-                          onClick={() => {
-                            setShowLastNoteSummary(false);
-                            startEditing(summaryNote);
-                          }}
-                          className="flex-1 py-3 rounded-xl border border-black/10 bg-white text-slate-900 font-black text-[10px] uppercase tracking-widest hover:bg-slate-50 transition-colors"
-                        >
-                          Open Note
-                        </button>
-                      </div>
-                    </div>
-                  </>
-                );
-              })()}
-            </motion.div>
-          </div>
         )}
       </AnimatePresence>
 
