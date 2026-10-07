@@ -38,9 +38,10 @@ export function registerPWA(handlers: PWAUpdateHandlers = {}) {
           });
         });
 
+        // Check regularly so an installed PWA picks up deployed changes promptly.
         window.setInterval(() => {
           if (navigator.onLine) void reg.update();
-        }, 60 * 60 * 1000);
+        }, 5 * 60 * 1000);
       })
       .catch((error) => {
         console.error('Vocal Note service worker registration failed:', error);
