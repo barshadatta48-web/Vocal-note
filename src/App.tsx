@@ -10,6 +10,8 @@ import { GoogleGenAI } from "@google/genai";
 
 import { Stage, Layer, Line as KonvaLine } from 'react-konva';
 import { postProcessSpeechTranscript, aiPostProcessSpeech } from './speechPostProcessor';
+import { PWAInstallButton } from './PWAInstallButton';
+import { OfflineIndicator } from './OfflineIndicator';
 
 interface DrawingLine {
   tool: string;
@@ -1629,6 +1631,9 @@ export default function App() {
             <Type size={20} />
           </button>
           
+          {/* PWA Install Button (automatically suppresses when already standalone) */}
+          <PWAInstallButton />
+
           {/* Unfinished Notes Notification Bell */}
           <div className="relative" ref={notificationRef}>
             <button
@@ -2540,6 +2545,9 @@ export default function App() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* PWA Offline Connectivity Indicator */}
+      <OfflineIndicator />
 
       <style>{`
         .note-content b, .note-content strong { font-weight: 700; }

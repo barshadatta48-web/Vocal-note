@@ -5,9 +5,12 @@ export type PWAUpdateHandlers = {
 };
 
 let registration: ServiceWorkerRegistration | null = null;
+let isRegistering = false;
 
 export function registerPWA(handlers: PWAUpdateHandlers = {}) {
-  if (!import.meta.env.PROD || !('serviceWorker' in navigator)) return;
+  if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;
+  if (registration || isRegistering) return;
+  isRegistering = true;
 
   const update = () => {
     if (navigator.onLine) handlers.onOnline?.();
@@ -16,12 +19,12 @@ export function registerPWA(handlers: PWAUpdateHandlers = {}) {
 
   window.addEventListener('online', update);
   window.addEventListener('offline', update);
-  update();
 
-  window.addEventListener('load', () => {
+  const initSW = () => {
     navigator.serviceWorker.register('/sw.js', { scope: '/' })
       .then((reg) => {
         registration = reg;
+        isRegistering = false;
 
         const notifyUpdate = () => {
           if (reg.waiting) handlers.onUpdateAvailable?.(reg);
@@ -38,15 +41,22 @@ export function registerPWA(handlers: PWAUpdateHandlers = {}) {
           });
         });
 
-        // Check regularly so an installed PWA picks up deployed changes promptly.
+        // Check periodically so an installed PWA picks up deployed updates promptly
         window.setInterval(() => {
-          if (navigator.onLine) void reg.update();
+          if (navigator.onLine) void reg.update().catch(() => {});
         }, 5 * 60 * 1000);
       })
       .catch((error) => {
-        console.error('Vocal Note service worker registration failed:', error);
+        isRegistering = false;
+        console.warn('Vocal Note service worker registration note:', error);
       });
-  });
+  };
+
+  if (document.readyState === 'complete') {
+    initSW();
+  } else {
+    window.addEventListener('load', initSW, { once: true });
+  }
 }
 
 export function activatePWAUpdate() {
@@ -58,6 +68,5 @@ export function activatePWAUpdate() {
   const reload = () => window.location.reload();
   navigator.serviceWorker.addEventListener('controllerchange', reload, { once: true });
 
-  // Safety fallback if the browser does not emit controllerchange promptly.
   window.setTimeout(reload, 3000);
 }
