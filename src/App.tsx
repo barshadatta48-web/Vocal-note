@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Trash2, Edit3, Check, X, Palette, MessageCircle, Send, Sparkles, Loader2, Image as ImageIcon, Camera, MoreVertical, CheckCircle2, Mic, MicOff, Pencil, Eraser, ArrowLeft, Wand2, Bold, Type, Minus, Underline, Hand, Maximize, StickyNote, Download, Upload } from 'lucide-react';
+import { Plus, Trash2, Edit3, Check, X, Palette, MessageCircle, Send, Sparkles, Loader2, Image as ImageIcon, Camera, MoreVertical, CheckCircle2, Mic, MicOff, Pencil, Eraser, ArrowLeft, Wand2, Bold, Type, Minus, Underline, Hand, Maximize, StickyNote, Download, Upload, Bell } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { GoogleGenAI } from "@google/genai";
 
@@ -30,6 +30,7 @@ interface Note {
   completed?: boolean;
   drawingLines?: DrawingLine[];
   fontSize?: number;
+  updatedAt?: number | Date | string;
 }
 
 interface Template {
@@ -386,6 +387,15 @@ export default function App() {
   
   const [isEditorMenuOpen, setIsEditorMenuOpen] = useState(false);
   
+  // Unfinished Notes notification state
+  const [isNotificationOpen, setIsNotificationOpen] = useState(false);
+  const [showStartupReminder, setShowStartupReminder] = useState(false);
+  const notificationRef = useRef<HTMLDivElement>(null);
+
+  // Derived unfinished notes and count (single source of truth)
+  const unfinishedNotes = notes.filter((n) => !n.completed);
+  const unfinishedCount = unfinishedNotes.length;
+  
   // Pan and Zoom state
   const [stageScale, setStageScale] = useState(1);
   const [stagePos, setStagePos] = useState({ x: 0, y: 0 });
@@ -514,6 +524,24 @@ export default function App() {
     }
   }, []);
 
+  // Startup check for unfinished notes reminder
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const savedNotesStr = localStorage.getItem('stickie-notes-rainbow');
+      if (savedNotesStr) {
+        try {
+          const parsed: Note[] = JSON.parse(savedNotesStr);
+          if (parsed.some(n => !n.completed)) {
+            setShowStartupReminder(true);
+          }
+        } catch (e) {
+          // ignore
+        }
+      }
+    }, 1200);
+    return () => clearTimeout(timer);
+  }, []);
+
   // Scroll chat to bottom
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -526,15 +554,61 @@ export default function App() {
     }
   }, [activeNoteId]);
 
-  // Handle outside clicks to close menus
+  // Handle outside clicks to close menus & notifications
   useEffect(() => {
-    const handleClickOutside = () => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (notificationRef.current && !notificationRef.current.contains(e.target as Node)) {
+        setIsNotificationOpen(false);
+      }
       setOpenMenuId(null);
       setIsHeaderMenuOpen(false);
     };
     window.addEventListener('click', handleClickOutside);
     return () => window.removeEventListener('click', handleClickOutside);
   }, []);
+
+  // Helper to extract clean title/summary for notification items
+  const getNoteSummary = (note: Note) => {
+    if (!note.content) {
+      if (note.image) return 'Photo Note';
+      if (note.drawingLines && note.drawingLines.length > 0) return 'Sketch Note';
+      return 'Untitled Note';
+    }
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = note.content;
+    const text = (tempDiv.textContent || tempDiv.innerText || '').trim();
+    if (text) {
+      const firstLine = text.split('\n')[0].trim();
+      return firstLine.length > 36 ? firstLine.slice(0, 36) + '...' : firstLine;
+    }
+    if (note.image) return 'Photo Note';
+    if (note.drawingLines && note.drawingLines.length > 0) return 'Sketch Note';
+    return 'Untitled Note';
+  };
+
+  // Helper to format note timestamp nicely
+  const formatNoteTime = (note: Note) => {
+    const timeVal = note.updatedAt || (Number(note.id) > 1000000000 ? Number(note.id) : null);
+    if (!timeVal) return 'Recently';
+    const date = timeVal instanceof Date ? timeVal : new Date(timeVal);
+    if (isNaN(date.getTime())) return 'Recently';
+    const now = new Date();
+    const isToday = now.toDateString() === date.toDateString();
+    if (isToday) {
+      return `Today, ${date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+    }
+    const yesterday = new Date();
+    yesterday.setDate(now.getDate() - 1);
+    if (yesterday.toDateString() === date.toDateString()) {
+      return 'Yesterday';
+    }
+    return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  };
+
+  const markComplete = (id: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setNotes(prev => prev.map(n => n.id === id ? { ...n, completed: true, updatedAt: Date.now() } : n));
+  };
 
   const addNote = (content = '', image?: string, drawingLines?: DrawingLine[], color?: string, pattern?: string) => {
     const notePatterns = PATTERNS.filter(p => p !== 'none');
@@ -550,6 +624,7 @@ export default function App() {
       x: 50 + (notes.length * 40) % 600,
       y: 50 + (notes.length * 40) % 400,
       fontSize: 48,
+      updatedAt: Date.now(),
     };
     setNotes([newNote, ...notes]);
     if (!content && !image && !drawingLines) {
@@ -668,7 +743,7 @@ export default function App() {
     if (activeNoteId) {
       setNotes(
         notes.map((n) =>
-          n.id === activeNoteId ? { ...n, content: editContent, fontSize: editFontSize } : n
+          n.id === activeNoteId ? { ...n, content: editContent, fontSize: editFontSize, updatedAt: Date.now() } : n
         )
       );
       setActiveNoteId(null);
@@ -678,7 +753,7 @@ export default function App() {
 
   const toggleComplete = (id: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
-    setNotes(notes.map(n => n.id === id ? { ...n, completed: !n.completed } : n));
+    setNotes(notes.map(n => n.id === id ? { ...n, completed: !n.completed, updatedAt: Date.now() } : n));
     setOpenMenuId(null);
   };
 
@@ -1554,6 +1629,123 @@ export default function App() {
             <Type size={20} />
           </button>
           
+          {/* Unfinished Notes Notification Bell */}
+          <div className="relative" ref={notificationRef}>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsNotificationOpen(!isNotificationOpen);
+                setShowStartupReminder(false);
+              }}
+              className="relative p-2 md:p-3 rounded-xl md:rounded-2xl transition-all hover:bg-black/5 text-slate-500 hover:text-slate-800"
+              title={unfinishedCount > 0 ? `${unfinishedCount} Unfinished Notes` : "Notifications"}
+              aria-label="Unfinished Notes Notification"
+            >
+              <Bell size={20} className={unfinishedCount > 0 ? "text-slate-700" : "text-slate-400"} />
+              {unfinishedCount > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-[19px] h-[19px] px-1 flex items-center justify-center text-[10px] font-black text-white bg-rose-500 rounded-full shadow-md border-2 border-white">
+                  {unfinishedCount > 99 ? '99+' : unfinishedCount}
+                </span>
+              )}
+            </button>
+
+            {/* Notification Dropdown Panel */}
+            <AnimatePresence>
+              {isNotificationOpen && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95, y: -6 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95, y: -6 }}
+                  transition={{ duration: 0.15 }}
+                  onClick={(e) => e.stopPropagation()}
+                  className="absolute right-0 top-full mt-2 w-80 sm:w-96 max-w-[calc(100vw-24px)] bg-white/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-black/10 z-50 overflow-hidden flex flex-col text-slate-800"
+                >
+                  <div className="flex items-center justify-between px-4 py-3 bg-slate-50/90 border-b border-black/5">
+                    <div className="flex items-center gap-2">
+                      <Bell size={16} className="text-rose-500" />
+                      <h3 className="font-extrabold text-sm text-slate-800 tracking-tight">Unfinished Notes</h3>
+                      {unfinishedCount > 0 && (
+                        <span className="px-2 py-0.5 text-[10px] font-black bg-rose-100 text-rose-600 rounded-full">
+                          {unfinishedCount}
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => setIsNotificationOpen(false)}
+                      className="p-1 hover:bg-black/5 rounded-lg text-slate-400 hover:text-slate-600 transition-colors"
+                      title="Close"
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+
+                  <div className="max-h-[360px] overflow-y-auto divide-y divide-black/5 p-1.5">
+                    {unfinishedCount === 0 ? (
+                      <div className="py-8 px-4 text-center flex flex-col items-center">
+                        <div className="w-12 h-12 rounded-full bg-emerald-50 text-emerald-500 flex items-center justify-center mb-2.5 shadow-inner">
+                          <CheckCircle2 size={24} />
+                        </div>
+                        <p className="font-bold text-sm text-slate-700">You're all caught up!</p>
+                        <p className="text-xs text-slate-400 mt-0.5">No unfinished notes.</p>
+                      </div>
+                    ) : (
+                      unfinishedNotes.map((note) => {
+                        const title = getNoteSummary(note);
+                        const timeString = formatNoteTime(note);
+                        return (
+                          <div
+                            key={note.id}
+                            className="group p-3 hover:bg-slate-50/80 rounded-xl transition-all flex items-center justify-between gap-3"
+                          >
+                            <div
+                              onClick={() => {
+                                startEditing(note);
+                                setIsNotificationOpen(false);
+                              }}
+                              className="flex-1 cursor-pointer min-w-0"
+                            >
+                              <div className="flex items-center gap-2">
+                                <div className={`w-2.5 h-2.5 rounded-full ${note.color || 'bg-slate-300'} ring-1 ring-black/10 shrink-0`} />
+                                <span className="font-bold text-xs text-slate-800 truncate group-hover:text-indigo-600 transition-colors">
+                                  {title}
+                                </span>
+                              </div>
+                              <p className="text-[10px] text-slate-400 mt-1 pl-4.5">
+                                Last edited: <span className="font-medium text-slate-500">{timeString}</span>
+                              </p>
+                            </div>
+
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <button
+                                onClick={() => {
+                                  startEditing(note);
+                                  setIsNotificationOpen(false);
+                                }}
+                                className="px-2.5 py-1 text-[11px] font-bold bg-indigo-50 hover:bg-indigo-600 text-indigo-600 hover:text-white rounded-lg transition-all"
+                                title="Continue Editing"
+                              >
+                                Continue
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  markComplete(note.id, e);
+                                }}
+                                className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all"
+                                title="Mark as Done"
+                              >
+                                <Check size={14} />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
           <button
             onClick={() => addNote()}
             className="group/btn px-3 md:px-8 py-2 md:py-3 bg-indigo-600 text-white rounded-xl md:rounded-[20px] text-xs md:text-sm font-black flex items-center gap-2 transition-all hover:scale-105 hover:bg-indigo-700 active:scale-95 shadow-lg relative overflow-hidden shrink-0"
@@ -2281,6 +2473,64 @@ export default function App() {
       </AnimatePresence>
 
       {/* Full Screen Editor Overlay */}
+
+      {/* Startup Reminder Toast for Unfinished Notes */}
+      <AnimatePresence>
+        {showStartupReminder && unfinishedCount > 0 && !activeNoteId && (
+          <motion.div
+            initial={{ opacity: 0, y: 50, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 30, scale: 0.95 }}
+            transition={{ duration: 0.25 }}
+            className="fixed bottom-6 right-6 z-[150] max-w-sm w-[calc(100vw-3rem)] bg-white/95 backdrop-blur-xl border border-rose-100 rounded-2xl shadow-2xl p-4 text-slate-800"
+          >
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-rose-50 text-rose-500 flex items-center justify-center shrink-0 shadow-inner">
+                <Bell size={20} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-extrabold text-sm text-slate-800 flex items-center gap-1.5">
+                    Unfinished Notes
+                    <span className="px-1.5 py-0.5 text-[10px] font-black bg-rose-100 text-rose-600 rounded-full">
+                      {unfinishedCount}
+                    </span>
+                  </h4>
+                  <button
+                    onClick={() => setShowStartupReminder(false)}
+                    className="text-slate-400 hover:text-slate-600 p-0.5 rounded-lg transition-colors"
+                    title="Dismiss"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+                <p className="text-xs text-slate-500 mt-1 leading-snug">
+                  {unfinishedCount === 1
+                    ? "You have 1 unfinished note waiting. Continue where you left off?"
+                    : `You have ${unfinishedCount} unfinished notes waiting. Continue where you left off?`}
+                </p>
+                <div className="flex items-center gap-2 mt-3">
+                  <button
+                    onClick={() => {
+                      setShowStartupReminder(false);
+                      setIsNotificationOpen(true);
+                    }}
+                    className="px-3 py-1.5 bg-rose-500 hover:bg-rose-600 text-white text-xs font-bold rounded-xl transition-all shadow-sm"
+                  >
+                    View Notes
+                  </button>
+                  <button
+                    onClick={() => setShowStartupReminder(false)}
+                    className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold rounded-xl transition-all"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <style>{`
         .note-content b, .note-content strong { font-weight: 700; }
