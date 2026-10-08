@@ -1,4 +1,4 @@
-const CACHE_NAME = 'vocal-note-pwa-v6';
+const CACHE_NAME = 'vocal-note-pwa-v7';
 const APP_SHELL = [
   '/',
   '/index.html',
@@ -12,51 +12,83 @@ const APP_SHELL = [
 ];
 
 self.addEventListener('install', (event) => {
+  console.log('[SW] install event: caching app shell resources...');
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then((cache) => cache.addAll(APP_SHELL))
-      .then(() => self.skipWaiting())
+      .then((cache) => {
+        return Promise.allSettled(
+          APP_SHELL.map((url) =>
+            fetch(url).then((res) => {
+              if (res && res.status === 200) {
+                return cache.put(url, res);
+              }
+            }).catch((err) => console.warn('[SW] Non-critical cache skip:', url, err))
+          )
+        );
+      })
+      .then(() => {
+        console.log('[SW] App shell caching phase completed.');
+        return self.skipWaiting();
+      })
+      .catch((err) => console.error('[SW] Install error:', err))
   );
 });
 
 self.addEventListener('activate', (event) => {
+  console.log('[SW] activate event: cleaning up old caches...');
   event.waitUntil(
     caches.keys()
       .then((keys) => Promise.all(
-        keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))
+        keys.filter((key) => key !== CACHE_NAME).map((key) => {
+          console.log('[SW] Pruning stale cache:', key);
+          return caches.delete(key);
+        })
       ))
-      .then(() => self.clients.claim())
+      .then(() => {
+        console.log('[SW] Active and controlling clients.');
+        return self.clients.claim();
+      })
   );
 });
 
 self.addEventListener('message', (event) => {
-  if (event.data?.type === 'SKIP_WAITING') self.skipWaiting();
+  if (event.data?.type === 'SKIP_WAITING') {
+    console.log('[SW] Received SKIP_WAITING signal.');
+    self.skipWaiting();
+  }
 });
 
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
 
   const request = event.request;
-  const url = new URL(request.url);
+  let url;
+  try {
+    url = new URL(request.url);
+  } catch {
+    return;
+  }
 
-  // Isolate service worker: do not intercept external APIs or AI Studio backend routes
+  // Isolate service worker: do not intercept external APIs or backend routes
   if (url.origin !== self.location.origin) return;
+  if (!url.protocol.startsWith('http')) return;
   if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/_')) return;
 
-  // Online: prefer fresh network response and cache static assets. Offline: fall back to cache.
+  const isNavigation = request.mode === 'navigate' || request.destination === 'document';
+
   event.respondWith(
     fetch(request)
       .then((response) => {
         if (response && response.status === 200) {
           const copy = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+          caches.open(CACHE_NAME).then((cache) => cache.put(request, copy)).catch(() => {});
         }
         return response;
       })
       .catch(() => {
         return caches.match(request).then((cached) => {
           if (cached) return cached;
-          if (request.mode === 'navigate') {
+          if (isNavigation) {
             return caches.match('/index.html') || caches.match('/');
           }
           return Response.error();

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Plus, Trash2, Edit3, Check, X, Palette, MessageCircle, Send, Sparkles, Loader2, Image as ImageIcon, Camera, MoreVertical, CheckCircle2, Mic, MicOff, Pencil, Eraser, ArrowLeft, Wand2, Bold, Type, Minus, Underline, Hand, Maximize, StickyNote, Download, Upload, Bell } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { GoogleGenAI } from "@google/genai";
@@ -428,31 +428,79 @@ export default function App() {
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
   const [micPermissionStatus, setMicPermissionStatus] = useState<'granted' | 'denied' | 'prompt' | 'unknown'>('unknown');
   const [micErrorMessage, setMicErrorMessage] = useState<string | null>(null);
+  const [isStorageLoaded, setIsStorageLoaded] = useState(false);
 
-  // Initialize Gemini
-  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+  // Safe localStorage helper so SSR/restricted iframe/incognito never throws
+  const safeGetItem = (key: string): string | null => {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        return window.localStorage.getItem(key);
+      }
+    } catch (e) {
+      console.warn('localStorage read error:', e);
+    }
+    return null;
+  };
+
+  const safeSetItem = (key: string, value: string): void => {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.setItem(key, value);
+      }
+    } catch (e) {
+      console.warn('localStorage write error:', e);
+    }
+  };
+
+  // Safely initialize Gemini client so missing keys or browser env never crash render
+  const ai = useMemo(() => {
+    try {
+      const key = (typeof process !== 'undefined' && process.env?.GEMINI_API_KEY) || '';
+      return key ? new GoogleGenAI({ apiKey: key }) : null;
+    } catch (e) {
+      console.warn('Gemini client could not be initialized:', e);
+      return null;
+    }
+  }, []);
 
   // Load notes and templates from localStorage
   useEffect(() => {
-    const savedNotes = localStorage.getItem('stickie-notes-rainbow');
+    const savedNotes = safeGetItem('stickie-notes-rainbow');
     if (savedNotes) {
       try {
-        setNotes(JSON.parse(savedNotes));
+        const parsed = JSON.parse(savedNotes);
+        if (Array.isArray(parsed)) {
+          setNotes(parsed);
+        }
       } catch (e) {
         console.error('Failed to parse notes from local storage', e);
       }
     }
-    const savedTemplates = localStorage.getItem('stickie-templates-rainbow');
+    const savedTemplates = safeGetItem('stickie-templates-rainbow');
     if (savedTemplates) {
       try {
-        setTemplates(JSON.parse(savedTemplates));
+        const parsedT = JSON.parse(savedTemplates);
+        if (Array.isArray(parsedT)) {
+          setTemplates(parsedT);
+        }
       } catch (e) {
         console.error('Failed to parse templates', e);
       }
     }
 
+    const savedViewMode = safeGetItem('rainbow-notepad-view-mode');
+    if (savedViewMode === 'grid' || savedViewMode === 'board') {
+      setViewMode(savedViewMode);
+    }
+    const savedColor = safeGetItem('rainbow-notepad-dashboard-color');
+    if (savedColor) {
+      setDashboardColor(savedColor);
+    }
+
+    setIsStorageLoaded(true);
+
     // Auto-popup AI assistant for new users
-    const hasVisited = localStorage.getItem('vocal-note-visited');
+    const hasVisited = safeGetItem('vocal-note-visited');
     if (!hasVisited) {
       setTimeout(() => {
         const welcomeId = Date.now().toString();
@@ -478,53 +526,50 @@ export default function App() {
         setEditContent(welcomeNote.content);
         setEditFontSize(48);
         setIsChatOpen(true);
-        localStorage.setItem('vocal-note-visited', 'true');
+        safeSetItem('vocal-note-visited', 'true');
       }, 1000); // Small delay to let the UI settle
     }
 
     // Check microphone permission status initially
-    if (navigator.permissions && navigator.permissions.query) {
-      navigator.permissions.query({ name: 'microphone' as any }).then(result => {
-        setMicPermissionStatus(result.state);
-        result.onchange = () => {
+    try {
+      if (typeof navigator !== 'undefined' && navigator.permissions && navigator.permissions.query) {
+        navigator.permissions.query({ name: 'microphone' as any }).then(result => {
           setMicPermissionStatus(result.state);
-        };
-      }).catch(err => {
-        console.warn("Permissions API not fully supported for microphone query:", err);
-      });
-    } else {
-      // Fallback for browsers that don't support permissions.query
+          result.onchange = () => {
+            setMicPermissionStatus(result.state);
+          };
+        }).catch(err => {
+          console.warn("Permissions API not fully supported for microphone query:", err);
+          setMicPermissionStatus('prompt');
+        });
+      } else {
+        setMicPermissionStatus('prompt');
+      }
+    } catch {
       setMicPermissionStatus('prompt');
     }
   }, []);
 
-  // Save to localStorage
+  // Save to localStorage ONLY AFTER initial load has completed
   useEffect(() => {
-    localStorage.setItem('stickie-notes-rainbow', JSON.stringify(notes));
-  }, [notes]);
+    if (!isStorageLoaded) return;
+    safeSetItem('stickie-notes-rainbow', JSON.stringify(notes));
+  }, [notes, isStorageLoaded]);
 
   useEffect(() => {
-    localStorage.setItem('stickie-templates-rainbow', JSON.stringify(templates));
-  }, [templates]);
+    if (!isStorageLoaded) return;
+    safeSetItem('stickie-templates-rainbow', JSON.stringify(templates));
+  }, [templates, isStorageLoaded]);
 
   useEffect(() => {
-    localStorage.setItem('rainbow-notepad-view-mode', viewMode);
-  }, [viewMode]);
+    if (!isStorageLoaded) return;
+    safeSetItem('rainbow-notepad-view-mode', viewMode);
+  }, [viewMode, isStorageLoaded]);
 
   useEffect(() => {
-    localStorage.setItem('rainbow-notepad-dashboard-color', dashboardColor);
-  }, [dashboardColor]);
-
-  useEffect(() => {
-    const savedViewMode = localStorage.getItem('rainbow-notepad-view-mode');
-    if (savedViewMode === 'grid' || savedViewMode === 'board') {
-      setViewMode(savedViewMode);
-    }
-    const savedColor = localStorage.getItem('rainbow-notepad-dashboard-color');
-    if (savedColor) {
-      setDashboardColor(savedColor);
-    }
-  }, []);
+    if (!isStorageLoaded) return;
+    safeSetItem('rainbow-notepad-dashboard-color', dashboardColor);
+  }, [dashboardColor, isStorageLoaded]);
 
   // Startup check for unfinished notes reminder
   useEffect(() => {
@@ -1037,11 +1082,15 @@ export default function App() {
           throw new Error('Server proxy unavailable');
         }
       } catch {
-        const response = await ai.models.generateContent({
-          model: "gemini-3-flash-preview",
-          contents: prompt,
-        });
-        aiText = response.text || '';
+        if (ai) {
+          const response = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: prompt,
+          });
+          aiText = response.text || '';
+        } else {
+          aiText = "AI features require configuring a GEMINI_API_KEY.";
+        }
       }
 
       if (aiText) {
@@ -1447,11 +1496,15 @@ export default function App() {
           throw new Error('Server proxy unavailable');
         }
       } catch {
-        const response = await ai.models.generateContent({
-          model: "gemini-3-flash-preview",
-          contents: prompt,
-        });
-        aiResponse = response.text || "I'm sorry, I couldn't process that.";
+        if (ai) {
+          const response = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: prompt,
+          });
+          aiResponse = response.text || "I'm sorry, I couldn't process that.";
+        } else {
+          aiResponse = "AI Assistant requires configuring GEMINI_API_KEY in your environment.";
+        }
       }
 
       setMessages(prev => [...prev, { role: 'assistant', content: aiResponse }]);
@@ -1514,7 +1567,7 @@ export default function App() {
               <div className="absolute top-0 right-0 w-3 h-3 md:w-5 md:h-5 bg-gradient-to-br from-orange-100 to-orange-400 rounded-bl-lg md:rounded-bl-xl shadow-inner border-l border-b border-orange-500/20" />
               
               {/* Microphone inside Note */}
-              <Mic className="text-teal-600 mt-1" size={window.innerWidth < 768 ? 24 : 32} />
+              <Mic className="text-teal-600 mt-1" size={typeof window !== 'undefined' && window.innerWidth < 768 ? 24 : 32} />
               
               {/* Bottom Gloss */}
               <div className="absolute bottom-0 left-0 right-0 h-1/2 bg-gradient-to-t from-teal-50/50 to-transparent" />
