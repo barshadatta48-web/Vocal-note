@@ -1819,7 +1819,10 @@ export default function App() {
       </header>
 
 
-      <main className={`mx-auto pt-[100px] md:pt-[140px] pb-12 relative z-10 ${viewMode === 'grid' ? 'max-w-[1600px] px-4 md:px-8' : 'w-full min-h-[2000px]'}`}>
+      <main 
+        className={`mx-auto pt-[100px] md:pt-[140px] pb-12 relative z-10 min-h-[calc(100vh-140px)] ${viewMode === 'grid' ? 'max-w-[1600px] px-4 md:px-8' : 'w-full'}`}
+        style={viewMode === 'board' ? { minHeight: `${Math.max(600, ...notes.map(n => (n.y || 0) + 400))}px` } : {}}
+      >
         {notes.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 md:py-32 text-slate-400">
             <div className="p-6 md:p-8 rounded-full bg-white shadow-inner mb-6 border border-black/5">
@@ -1828,7 +1831,7 @@ export default function App() {
             <p className="text-lg md:text-xl font-semibold opacity-30 italic text-center px-4">Start your vocal collection...</p>
           </div>
         ) : (
-          <div className={viewMode === 'grid' ? "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6 md:gap-12" : "relative w-full h-full"}>
+          <div className={viewMode === 'grid' ? "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6 md:gap-8 items-start" : "relative w-full min-h-[calc(100vh-140px)]"}>
             <AnimatePresence mode="popLayout">
               {notes.map((note) => (
                 <motion.div
@@ -1855,10 +1858,10 @@ export default function App() {
                   onClick={() => startEditing(note)}
                   style={viewMode === 'board' ? { position: 'absolute', top: 0, left: 0 } : {}}
                   className={`
-                    relative min-h-[300px] md:min-h-[380px] p-6 md:p-[30px] flex flex-col items-start
+                    relative min-h-[170px] md:min-h-[190px] h-auto p-5 md:p-[24px] flex flex-col items-start
                     note-shadow hover:note-shadow-hover paper-texture
                     border border-black/5
-                    transition-all duration-500 note-corner-fold group
+                    transition-all duration-300 note-corner-fold group
                     ${viewMode === 'board' ? 'w-[280px] md:w-[320px] cursor-grab active:cursor-grabbing' : 'w-full cursor-pointer'}
                     ${note.color}
                     ${note.pattern && note.pattern !== 'none' ? note.pattern : ''}
@@ -1876,7 +1879,7 @@ export default function App() {
                     'from-purple-400/30 to-purple-600/30'
                   }`} />
                   
-                  <div className="note-header w-full flex justify-between items-center text-[11px] uppercase tracking-[2.5px] font-black opacity-30 mb-[25px] pointer-events-none">
+                  <div className="note-header w-full flex justify-between items-center text-[11px] uppercase tracking-[2.5px] font-black opacity-30 mb-[16px] pointer-events-none">
                     <div className="flex items-center gap-1">
                        <div className="w-2 h-2 rounded-full bg-white/50" />
                        <span>{new Date().toLocaleDateString('en-US', { month: 'short', day: '2-digit' })}</span>
@@ -1885,21 +1888,21 @@ export default function App() {
                   </div>
 
                   {note.image && (
-                    <div className="relative w-full mb-4 pointer-events-none">
+                    <div className="relative w-full mb-3 pointer-events-none">
                       <img 
                         src={note.image} 
                         alt="Attached photo" 
-                        className="w-full aspect-video object-cover rounded-xl shadow-md border border-black/5" 
+                        className="w-full max-h-48 object-cover rounded-xl shadow-md border border-black/5" 
                         referrerPolicy="no-referrer"
                       />
                     </div>
                   )}
 
-                  <div className="w-full h-full flex flex-col relative pointer-events-none">
+                  <div className="w-full flex-1 flex flex-col relative pointer-events-none">
                     {/* Drawing Layer Preview */}
                     {(note.drawingLines && note.drawingLines.length > 0) && (
-                      <div className="absolute inset-0 z-0">
-                        <Stage width={300} height={400} className="w-full h-full">
+                      <div className="absolute inset-0 z-0 overflow-hidden">
+                        <Stage width={300} height={260} className="w-full h-full">
                           <Layer>
                             {note.drawingLines.map((line, i) => (
                               <KonvaLine
@@ -1921,14 +1924,14 @@ export default function App() {
                     )}
 
                     <div 
-                      className="flex-1 w-full overflow-hidden leading-[1.4] text-[#222] whitespace-pre-wrap relative z-10 note-content"
+                      className="w-full leading-[1.5] text-[#222] break-words relative z-10 note-content"
                       style={{ 
-                        fontSize: `${Math.min(24, (note.fontSize || 48) / 2.5)}px`
+                        fontSize: `${Math.min(20, Math.max(14, (note.fontSize || 48) / 2.5))}px`
                       }}
                       dangerouslySetInnerHTML={{ __html: note.content || (!note.image && !note.drawingLines?.length ? '<span class="opacity-20 italic">Empty note...</span>' : '') }}
                     />
                     
-                    <div className="flex items-center justify-end gap-2.5 pt-4 opacity-40 group-hover:opacity-100 transition-all transform translate-y-0 relative pointer-events-auto">
+                    <div className="flex items-center justify-end gap-2.5 pt-3 mt-auto w-full opacity-40 group-hover:opacity-100 transition-all transform translate-y-0 relative pointer-events-auto">
                       <button
                         onClick={(e) => toggleComplete(note.id, e)}
                         className={`p-2.5 rounded-xl transition-colors border border-black/10 ${note.completed ? 'bg-emerald-500 text-white shadow-sm' : 'bg-white/20 hover:bg-emerald-500 hover:text-white text-emerald-600'}`}
@@ -2606,6 +2609,10 @@ export default function App() {
         .note-content b, .note-content strong { font-weight: 700; }
         .note-content u { text-decoration: underline; }
         .note-content s, .note-content strike, .note-content del { text-decoration: none; }
+        .note-content p { margin: 0 0 0.35em 0; }
+        .note-content p:last-child { margin-bottom: 0; }
+        .note-content ul, .note-content ol { margin: 0.2em 0 0.4em 1.25em; }
+        .note-content h1, .note-content h2, .note-content h3 { margin: 0 0 0.35em 0; line-height: 1.2; }
       `}</style>
     </div>
   );
