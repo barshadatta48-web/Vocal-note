@@ -1497,7 +1497,7 @@ export default function App() {
         className="hidden"
       />
 
-      <header className="fixed top-0 left-0 right-0 z-50 px-4 md:px-[50px] py-4 md:py-[20px] flex items-center justify-between bg-premium-header shadow-sm overflow-hidden min-h-[72px] md:min-h-0">
+      <header className="fixed top-0 left-0 right-0 z-[100] px-4 md:px-[50px] py-4 md:py-[20px] flex items-center justify-between bg-premium-header shadow-sm overflow-visible min-h-[72px] md:min-h-0">
         {/* Subtle Rainbow Detail */}
         <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 opacity-20" />
         
@@ -1658,7 +1658,7 @@ export default function App() {
                   exit={{ opacity: 0, scale: 0.95, y: -6 }}
                   transition={{ duration: 0.15 }}
                   onClick={(e) => e.stopPropagation()}
-                  className="absolute right-0 top-full mt-2 w-80 sm:w-96 max-w-[calc(100vw-24px)] bg-white/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-black/10 z-50 overflow-hidden flex flex-col text-slate-800"
+                  className="fixed top-[76px] right-3 sm:absolute sm:top-full sm:right-0 sm:mt-2 w-80 sm:w-96 max-w-[calc(100vw-24px)] bg-white/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-black/10 z-[1000] overflow-hidden flex flex-col text-slate-800"
                 >
                   <div className="flex items-center justify-between px-4 py-3 bg-slate-50/90 border-b border-black/5">
                     <div className="flex items-center gap-2">
@@ -1695,6 +1695,7 @@ export default function App() {
                         return (
                           <div
                             key={note.id}
+                            onContextMenu={(e) => e.preventDefault()}
                             className="group p-3 hover:bg-slate-50/80 rounded-xl transition-all flex items-center justify-between gap-3"
                           >
                             <div
@@ -1715,25 +1716,26 @@ export default function App() {
                               </p>
                             </div>
 
-                            <div className="flex items-center gap-1.5 shrink-0">
+                            <div className="flex items-center gap-1 shrink-0">
                               <button
                                 onClick={() => {
                                   startEditing(note);
                                   setIsNotificationOpen(false);
                                 }}
-                                className="px-2.5 py-1 text-[11px] font-bold bg-indigo-50 hover:bg-indigo-600 text-indigo-600 hover:text-white rounded-lg transition-all"
+                                className="px-2.5 py-1 text-[11px] font-black uppercase tracking-wider bg-indigo-50 hover:bg-indigo-600 text-indigo-600 hover:text-white rounded-lg transition-all"
                                 title="Continue Editing"
                               >
-                                Continue
+                                CONTINUE
                               </button>
                               <button
                                 onClick={(e) => {
                                   markComplete(note.id, e);
                                 }}
-                                className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all"
-                                title="Mark as Done"
+                                className="px-2 py-1 text-[13px] font-black bg-emerald-50 hover:bg-emerald-600 text-emerald-600 hover:text-white rounded-lg transition-all flex items-center justify-center leading-none"
+                                title="Mark as Completed"
+                                aria-label="Mark note as completed"
                               >
-                                <Check size={14} />
+                                ✓
                               </button>
                             </div>
                           </div>
@@ -1861,14 +1863,21 @@ export default function App() {
                     )}
 
                     <div 
-                      className={`flex-1 w-full overflow-hidden leading-[1.4] text-[#222] whitespace-pre-wrap relative z-10 note-content ${note.completed ? 'line-through opacity-40' : ''}`}
+                      className="flex-1 w-full overflow-hidden leading-[1.4] text-[#222] whitespace-pre-wrap relative z-10 note-content"
                       style={{ 
                         fontSize: `${Math.min(24, (note.fontSize || 48) / 2.5)}px`
                       }}
                       dangerouslySetInnerHTML={{ __html: note.content || (!note.image && !note.drawingLines?.length ? '<span class="opacity-20 italic">Empty note...</span>' : '') }}
                     />
                     
-                    <div className="flex items-center justify-end gap-3 pt-4 opacity-40 group-hover:opacity-100 transition-all transform translate-y-0 relative pointer-events-auto">
+                    <div className="flex items-center justify-end gap-2.5 pt-4 opacity-40 group-hover:opacity-100 transition-all transform translate-y-0 relative pointer-events-auto">
+                      <button
+                        onClick={(e) => toggleComplete(note.id, e)}
+                        className={`p-2.5 rounded-xl transition-colors border border-black/10 ${note.completed ? 'bg-emerald-500 text-white shadow-sm' : 'bg-white/20 hover:bg-emerald-500 hover:text-white text-emerald-600'}`}
+                        title={note.completed ? "Mark as Incomplete" : "Mark as Completed"}
+                      >
+                        <Check size={18} />
+                      </button>
                       <button
                         onClick={(e) => changeColor(note.id, e)}
                         className="p-2.5 rounded-xl bg-white/20 hover:bg-white text-purple-600 transition-colors border border-black/10"
@@ -2535,6 +2544,7 @@ export default function App() {
       <style>{`
         .note-content b, .note-content strong { font-weight: 700; }
         .note-content u { text-decoration: underline; }
+        .note-content s, .note-content strike, .note-content del { text-decoration: none; }
       `}</style>
     </div>
   );
