@@ -470,7 +470,9 @@ export default function App() {
       try {
         const parsed = JSON.parse(savedNotes);
         if (Array.isArray(parsed)) {
-          setNotes(parsed);
+          // Clean out any legacy welcome note so user lands directly on clean dashboard / empty state
+          const cleaned = parsed.filter(n => !n.content?.includes('Welcome to Vocal Note!'));
+          setNotes(cleaned);
         }
       } catch (e) {
         console.error('Failed to parse notes from local storage', e);
@@ -498,37 +500,7 @@ export default function App() {
     }
 
     setIsStorageLoaded(true);
-
-    // Auto-popup AI assistant for new users
-    const hasVisited = safeGetItem('vocal-note-visited');
-    if (!hasVisited) {
-      setTimeout(() => {
-        const welcomeId = Date.now().toString();
-        const welcomeNote: Note = {
-          id: welcomeId,
-          content: `
-            <h1 style="font-size: 1.5em; font-weight: 900; margin-bottom: 0.5em;">Welcome to Vocal Note! 🎤</h1>
-            <p>Your premium space for voice-captured thoughts. Try these features:</p>
-            <ul style="margin-top: 1em; list-style-type: disc; padding-left: 1.5em;">
-              <li><b>Voice Dictation:</b> Hit the mic and start talking.</li>
-              <li><b>AI Assistant:</b> Brainstorm ideas right in the chat.</li>
-              <li><b>Sketch Mode:</b> Draw your visions with the pencil tool.</li>
-            </ul>
-            <p style="margin-top: 1em; font-style: italic; opacity: 0.7;">Feel free to delete this note or make it your own!</p>
-          `,
-          color: 'bg-note-indigo',
-          rotation: -1 + Math.random() * 2,
-          x: 100,
-          y: 100,
-        };
-        setNotes(prev => [welcomeNote, ...prev]);
-        setActiveNoteId(welcomeId);
-        setEditContent(welcomeNote.content);
-        setEditFontSize(48);
-        setIsChatOpen(true);
-        safeSetItem('vocal-note-visited', 'true');
-      }, 1000); // Small delay to let the UI settle
-    }
+    safeSetItem('vocal-note-visited', 'true');
 
     // Check microphone permission status initially
     try {
@@ -1858,11 +1830,11 @@ export default function App() {
                   onClick={() => startEditing(note)}
                   style={viewMode === 'board' ? { position: 'absolute', top: 0, left: 0 } : {}}
                   className={`
-                    relative min-h-[170px] md:min-h-[190px] h-auto p-5 md:p-[24px] flex flex-col items-start
+                    relative w-full h-[290px] sm:h-[310px] md:h-[330px] p-5 md:p-[22px] flex flex-col items-start
                     note-shadow hover:note-shadow-hover paper-texture
                     border border-black/5
-                    transition-all duration-300 note-corner-fold group
-                    ${viewMode === 'board' ? 'w-[280px] md:w-[320px] cursor-grab active:cursor-grabbing' : 'w-full cursor-pointer'}
+                    transition-all duration-300 note-corner-fold group overflow-hidden
+                    ${viewMode === 'board' ? '!w-[280px] md:!w-[310px] cursor-grab active:cursor-grabbing' : 'cursor-pointer'}
                     ${note.color}
                     ${note.pattern && note.pattern !== 'none' ? note.pattern : ''}
                     ${note.completed ? 'opacity-80' : ''}
@@ -1879,7 +1851,7 @@ export default function App() {
                     'from-purple-400/30 to-purple-600/30'
                   }`} />
                   
-                  <div className="note-header w-full flex justify-between items-center text-[11px] uppercase tracking-[2.5px] font-black opacity-30 mb-[16px] pointer-events-none">
+                  <div className="note-header w-full flex justify-between items-center text-[11px] uppercase tracking-[2.5px] font-black opacity-30 mb-2.5 shrink-0 pointer-events-none">
                     <div className="flex items-center gap-1">
                        <div className="w-2 h-2 rounded-full bg-white/50" />
                        <span>{new Date().toLocaleDateString('en-US', { month: 'short', day: '2-digit' })}</span>
@@ -1888,21 +1860,21 @@ export default function App() {
                   </div>
 
                   {note.image && (
-                    <div className="relative w-full mb-3 pointer-events-none">
+                    <div className="relative w-full mb-2.5 shrink-0 pointer-events-none max-h-24 md:max-h-28 overflow-hidden rounded-xl">
                       <img 
                         src={note.image} 
                         alt="Attached photo" 
-                        className="w-full max-h-48 object-cover rounded-xl shadow-md border border-black/5" 
+                        className="w-full h-full object-cover rounded-xl shadow-sm border border-black/5" 
                         referrerPolicy="no-referrer"
                       />
                     </div>
                   )}
 
-                  <div className="w-full flex-1 flex flex-col relative pointer-events-none">
+                  <div className="w-full flex-1 min-h-0 flex flex-col relative overflow-hidden my-0.5">
                     {/* Drawing Layer Preview */}
                     {(note.drawingLines && note.drawingLines.length > 0) && (
-                      <div className="absolute inset-0 z-0 overflow-hidden">
-                        <Stage width={300} height={260} className="w-full h-full">
+                      <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
+                        <Stage width={280} height={220} className="w-full h-full">
                           <Layer>
                             {note.drawingLines.map((line, i) => (
                               <KonvaLine
@@ -1924,36 +1896,36 @@ export default function App() {
                     )}
 
                     <div 
-                      className="w-full leading-[1.5] text-[#222] break-words relative z-10 note-content"
+                      className="w-full flex-1 min-h-0 overflow-y-auto overscroll-contain pr-1.5 leading-[1.45] text-[#222] break-words relative z-10 note-content custom-scrollbar pointer-events-auto"
                       style={{ 
-                        fontSize: `${Math.min(20, Math.max(14, (note.fontSize || 48) / 2.5))}px`
+                        fontSize: `${Math.min(18, Math.max(13, (note.fontSize || 48) / 2.7))}px`
                       }}
                       dangerouslySetInnerHTML={{ __html: note.content || (!note.image && !note.drawingLines?.length ? '<span class="opacity-20 italic">Empty note...</span>' : '') }}
                     />
-                    
-                    <div className="flex items-center justify-end gap-2.5 pt-3 mt-auto w-full opacity-40 group-hover:opacity-100 transition-all transform translate-y-0 relative pointer-events-auto">
-                      <button
-                        onClick={(e) => toggleComplete(note.id, e)}
-                        className={`p-2.5 rounded-xl transition-colors border border-black/10 ${note.completed ? 'bg-emerald-500 text-white shadow-sm' : 'bg-white/20 hover:bg-emerald-500 hover:text-white text-emerald-600'}`}
-                        title={note.completed ? "Mark as Incomplete" : "Mark as Completed"}
-                      >
-                        <Check size={18} />
-                      </button>
-                      <button
-                        onClick={(e) => changeColor(note.id, e)}
-                        className="p-2.5 rounded-xl bg-white/20 hover:bg-white text-purple-600 transition-colors border border-black/10"
-                        title="Warp Spectrum"
-                      >
-                        <Palette size={18} />
-                      </button>
-                      <button
-                        onClick={(e) => deleteNote(note.id, e)}
-                        className="p-2.5 rounded-xl bg-white/20 hover:bg-red-500 hover:text-white text-red-500 transition-colors border border-black/10"
-                        title="Delete"
-                      >
-                        <Trash2 size={18} />
-                      </button>
-                    </div>
+                  </div>
+                  
+                  <div className="flex items-center justify-end gap-2 pt-2 mt-auto shrink-0 w-full opacity-40 group-hover:opacity-100 transition-all transform translate-y-0 relative z-20 pointer-events-auto border-t border-black/[0.04]">
+                    <button
+                      onClick={(e) => toggleComplete(note.id, e)}
+                      className={`p-2 rounded-xl transition-colors border border-black/10 ${note.completed ? 'bg-emerald-500 text-white shadow-sm' : 'bg-white/20 hover:bg-emerald-500 hover:text-white text-emerald-600'}`}
+                      title={note.completed ? "Mark as Incomplete" : "Mark as Completed"}
+                    >
+                      <Check size={16} />
+                    </button>
+                    <button
+                      onClick={(e) => changeColor(note.id, e)}
+                      className="p-2 rounded-xl bg-white/20 hover:bg-white text-purple-600 transition-colors border border-black/10"
+                      title="Warp Spectrum"
+                    >
+                      <Palette size={16} />
+                    </button>
+                    <button
+                      onClick={(e) => deleteNote(note.id, e)}
+                      className="p-2 rounded-xl bg-white/20 hover:bg-red-500 hover:text-white text-red-500 transition-colors border border-black/10"
+                      title="Delete"
+                    >
+                      <Trash2 size={16} />
+                    </button>
                   </div>
                 </motion.div>
               ))}
