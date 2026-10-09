@@ -372,6 +372,22 @@ export default function App() {
   const [notes, setNotes] = useState<Note[]>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [viewMode, setViewMode] = useState<'grid' | 'board'>('grid');
+  const [isMobile, setIsMobile] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return window.innerWidth < 640;
+    }
+    return false;
+  });
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth < 640);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  const isBoardActive = viewMode === 'board' && !isMobile;
   const [dashboardColor, setDashboardColor] = useState('#fcfaf7');
   const [isTemplatesModalOpen, setIsTemplatesModalOpen] = useState(false);
   const [editContent, setEditContent] = useState('');
@@ -1524,22 +1540,22 @@ export default function App() {
         className="hidden"
       />
 
-      <header className="fixed top-0 left-0 right-0 z-[100] px-4 md:px-[50px] py-4 md:py-[20px] flex items-center justify-between bg-premium-header shadow-sm overflow-visible min-h-[72px] md:min-h-0">
+      <header className="fixed top-0 left-0 right-0 z-[100] px-2.5 sm:px-4 md:px-[50px] py-2.5 sm:py-3 md:py-[20px] flex items-center justify-between bg-premium-header shadow-sm overflow-visible min-h-[62px] md:min-h-0">
         {/* Subtle Rainbow Detail */}
         <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 opacity-20" />
         
-        <div className="flex items-center gap-3 md:gap-5 group cursor-default shrink-0">
-          <div className="relative flex items-center justify-center">
+        <div className="flex items-center gap-2 sm:gap-3 md:gap-5 group cursor-default shrink-0 min-w-0">
+          <div className="relative flex items-center justify-center shrink-0">
             {/* 3D-ish Note Frame Shadow/Glow */}
             <div className="absolute -inset-2 bg-teal-500/10 rounded-full blur-xl group-hover:bg-teal-500/20 transition-all duration-700" />
             
             {/* Note Shape with Folded Corner */}
-            <div className="relative w-10 h-10 md:w-14 md:h-14 bg-white border-2 border-teal-500/20 rounded-xl md:rounded-2xl shadow-sm flex items-center justify-center overflow-hidden">
+            <div className="relative w-9 h-9 sm:w-11 sm:h-11 md:w-14 md:h-14 bg-white border-2 border-teal-500/20 rounded-xl md:rounded-2xl shadow-sm flex items-center justify-center overflow-hidden">
               {/* Folded Corner Mimic */}
-              <div className="absolute top-0 right-0 w-3 h-3 md:w-5 md:h-5 bg-gradient-to-br from-orange-100 to-orange-400 rounded-bl-lg md:rounded-bl-xl shadow-inner border-l border-b border-orange-500/20" />
+              <div className="absolute top-0 right-0 w-2.5 h-2.5 sm:w-3.5 sm:h-3.5 md:w-5 md:h-5 bg-gradient-to-br from-orange-100 to-orange-400 rounded-bl-lg md:rounded-bl-xl shadow-inner border-l border-b border-orange-500/20" />
               
               {/* Microphone inside Note */}
-              <Mic className="text-teal-600 mt-1" size={typeof window !== 'undefined' && window.innerWidth < 768 ? 24 : 32} />
+              <Mic className="text-teal-600 mt-0.5 sm:mt-1" size={isMobile ? 20 : 30} />
               
               {/* Bottom Gloss */}
               <div className="absolute bottom-0 left-0 right-0 h-1/2 bg-gradient-to-t from-teal-50/50 to-transparent" />
@@ -1547,7 +1563,7 @@ export default function App() {
           </div>
           
           <div className="flex flex-col">
-            <h1 className="text-lg md:text-2xl font-black tracking-tighter flex items-center leading-[0.9]">
+            <h1 className="text-base sm:text-xl md:text-2xl font-black tracking-tighter flex items-center leading-[0.9] select-none">
               <span className="text-teal-700">Vocal</span>
               <span className="text-slate-700">Note</span>
             </h1>
@@ -1563,7 +1579,7 @@ export default function App() {
             <motion.div 
               initial={{ opacity: 0, x: -20 }}
               animate={{ opacity: 1, x: 0 }}
-              className="ml-2 md:ml-6 flex items-center gap-2 px-2 md:px-4 py-1.5 md:py-2 bg-red-500/10 border border-red-500/20 rounded-full text-red-600 text-[10px] md:text-xs font-bold shadow-sm cursor-help group relative"
+              className="ml-1 sm:ml-3 md:ml-6 flex items-center gap-1.5 px-2 md:px-4 py-1 md:py-2 bg-red-500/10 border border-red-500/20 rounded-full text-red-600 text-[10px] md:text-xs font-bold shadow-sm cursor-help group relative"
             >
               <MicOff size={12} />
               <span className="hidden xs:inline">Mic Error</span>
@@ -1582,12 +1598,12 @@ export default function App() {
           )}
         </div>
         
-        <div className="flex items-center gap-1 md:gap-[15px]">
+        <div className="flex items-center gap-1 sm:gap-1.5 md:gap-3 shrink-0">
           {/* View Mode Toggle - Icon only on mobile */}
           <div className="flex items-center bg-black/5 rounded-xl md:rounded-2xl p-0.5 md:p-1 border border-black/5">
              <button
               onClick={() => setViewMode('grid')}
-              className={`p-2 md:px-4 md:py-2 rounded-lg md:rounded-xl leading-none transition-all ${viewMode === 'grid' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-slate-600'}`}
+              className={`min-w-[34px] min-h-[34px] sm:min-w-[38px] sm:min-h-[38px] p-1.5 sm:p-2 md:px-4 md:py-2 rounded-lg md:rounded-xl leading-none transition-all flex items-center justify-center ${viewMode === 'grid' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
               title="Grid View"
             >
               <span className="hidden md:inline text-[10px] font-black uppercase tracking-widest">Grid</span>
@@ -1595,7 +1611,7 @@ export default function App() {
             </button>
             <button
               onClick={() => setViewMode('board')}
-              className={`p-2 md:px-4 md:py-2 rounded-lg md:rounded-xl leading-none transition-all ${viewMode === 'board' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-slate-600'}`}
+              className={`min-w-[34px] min-h-[34px] sm:min-w-[38px] sm:min-h-[38px] p-1.5 sm:p-2 md:px-4 md:py-2 rounded-lg md:rounded-xl leading-none transition-all flex items-center justify-center ${viewMode === 'board' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
               title="Board View"
             >
               <span className="hidden md:inline text-[10px] font-black uppercase tracking-widest">Board</span>
@@ -1603,7 +1619,7 @@ export default function App() {
             </button>
           </div>
 
-          <div className="hidden xs:block h-4 w-px bg-black/10 mx-1" />
+          <div className="hidden xs:block h-4 w-px bg-black/10 mx-0.5 sm:mx-1" />
 
           {/* Theme cycle icon only on mobile */}
           <button
@@ -1612,11 +1628,11 @@ export default function App() {
               const nextIndex = (currentIndex + 1) % DASHBOARD_COLORS.length;
               setDashboardColor(DASHBOARD_COLORS[nextIndex].value);
             }}
-            className="p-3 md:px-4 md:py-2.5 bg-black/5 rounded-xl md:rounded-2xl border border-black/5 hover:bg-black/10 transition-all group/palette flex items-center gap-2"
+            className="min-w-[34px] min-h-[34px] sm:min-w-[38px] sm:min-h-[38px] p-1.5 sm:p-2 md:px-4 md:py-2.5 bg-black/5 rounded-xl md:rounded-2xl border border-black/5 hover:bg-black/10 transition-all group/palette flex items-center justify-center gap-1.5 sm:gap-2"
             title="Cycle Dashboard Theme"
           >
             <div 
-              className="w-4 h-4 md:w-5 md:h-5 rounded-full border-2 border-white shadow-sm transition-transform group-hover/palette:rotate-180 duration-500"
+              className="w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-5 md:h-5 rounded-full border-2 border-white shadow-sm transition-transform group-hover/palette:rotate-180 duration-500 shrink-0"
               style={{ backgroundColor: dashboardColor }}
             />
             <div className="hidden md:flex flex-col items-start leading-none text-left">
@@ -1634,14 +1650,14 @@ export default function App() {
           <div className="hidden sm:flex items-center gap-1">
             <button
               onClick={importData}
-              className="p-2 md:p-3 rounded-xl md:rounded-2xl transition-all hover:bg-black/5 text-slate-400 hover:text-slate-600"
+              className="min-w-[38px] min-h-[38px] p-2 md:p-3 rounded-xl md:rounded-2xl transition-all hover:bg-black/5 text-slate-400 hover:text-slate-600 flex items-center justify-center"
               title="Restore Storage"
             >
               <Upload size={18} />
             </button>
             <button
               onClick={exportData}
-              className="p-2 md:p-3 rounded-xl md:rounded-2xl transition-all hover:bg-black/5 text-slate-400 hover:text-slate-600"
+              className="min-w-[38px] min-h-[38px] p-2 md:p-3 rounded-xl md:rounded-2xl transition-all hover:bg-black/5 text-slate-400 hover:text-slate-600 flex items-center justify-center"
               title="Backup Storage"
             >
               <Download size={18} />
@@ -1650,10 +1666,10 @@ export default function App() {
           
           <button
             onClick={() => setIsTemplatesModalOpen(true)}
-            className="p-2 md:p-3 rounded-xl md:rounded-2xl transition-all hover:bg-black/5 text-slate-400 hover:text-slate-600"
+            className="min-w-[34px] min-h-[34px] sm:min-w-[38px] sm:min-h-[38px] p-1.5 sm:p-2 md:p-3 rounded-xl md:rounded-2xl transition-all hover:bg-black/5 text-slate-400 hover:text-slate-600 flex items-center justify-center"
             title="Note Templates"
           >
-            <Type size={20} />
+            <Type size={18} className="md:w-5 md:h-5" />
           </button>
           
           {/* PWA Install Button (automatically suppresses when already standalone) */}
@@ -1667,13 +1683,13 @@ export default function App() {
                 setIsNotificationOpen(!isNotificationOpen);
                 setShowStartupReminder(false);
               }}
-              className="relative p-2 md:p-3 rounded-xl md:rounded-2xl transition-all hover:bg-black/5 text-slate-500 hover:text-slate-800"
+              className="relative min-w-[34px] min-h-[34px] sm:min-w-[38px] sm:min-h-[38px] p-1.5 sm:p-2 md:p-3 rounded-xl md:rounded-2xl transition-all hover:bg-black/5 text-slate-500 hover:text-slate-800 flex items-center justify-center"
               title={unfinishedCount > 0 ? `${unfinishedCount} Unfinished Notes` : "Notifications"}
               aria-label="Unfinished Notes Notification"
             >
-              <Bell size={20} className={unfinishedCount > 0 ? "text-slate-700" : "text-slate-400"} />
+              <Bell size={18} className={`md:w-5 md:h-5 ${unfinishedCount > 0 ? "text-slate-700" : "text-slate-400"}`} />
               {unfinishedCount > 0 && (
-                <span className="absolute -top-1 -right-1 min-w-[19px] h-[19px] px-1 flex items-center justify-center text-[10px] font-black text-white bg-rose-500 rounded-full shadow-md border-2 border-white">
+                <span className="absolute -top-1 -right-1 min-w-[17px] sm:min-w-[19px] h-[17px] sm:h-[19px] px-1 flex items-center justify-center text-[9px] sm:text-[10px] font-black text-white bg-rose-500 rounded-full shadow-md border-2 border-white">
                   {unfinishedCount > 99 ? '99+' : unfinishedCount}
                 </span>
               )}
@@ -1688,7 +1704,7 @@ export default function App() {
                   exit={{ opacity: 0, scale: 0.95, y: -6 }}
                   transition={{ duration: 0.15 }}
                   onClick={(e) => e.stopPropagation()}
-                  className="fixed top-[76px] right-3 sm:absolute sm:top-full sm:right-0 sm:mt-2 w-80 sm:w-96 max-w-[calc(100vw-24px)] bg-white/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-black/10 z-[1000] overflow-hidden flex flex-col text-slate-800"
+                  className="fixed top-[68px] right-2 sm:absolute sm:top-full sm:right-0 sm:mt-2 w-[calc(100vw-16px)] sm:w-96 max-w-md bg-white/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-black/10 z-[1000] overflow-hidden flex flex-col text-slate-800"
                 >
                   <div className="flex items-center justify-between px-4 py-3 bg-slate-50/90 border-b border-black/5">
                     <div className="flex items-center gap-2">
@@ -1780,10 +1796,10 @@ export default function App() {
 
           <button
             onClick={() => addNote()}
-            className="group/btn px-3 md:px-8 py-2 md:py-3 bg-indigo-600 text-white rounded-xl md:rounded-[20px] text-xs md:text-sm font-black flex items-center gap-2 transition-all hover:scale-105 hover:bg-indigo-700 active:scale-95 shadow-lg relative overflow-hidden shrink-0"
+            className="group/btn px-2.5 sm:px-4 md:px-8 py-1.5 sm:py-2 md:py-3 bg-indigo-600 text-white rounded-xl md:rounded-[20px] text-[11px] sm:text-xs md:text-sm font-black flex items-center justify-center gap-1 sm:gap-2 transition-all hover:scale-105 hover:bg-indigo-700 active:scale-95 shadow-md shrink-0 min-h-[34px] sm:min-h-[40px] relative overflow-hidden"
           >
             <div className="absolute inset-0 bg-white/10 opacity-0 group-hover/btn:opacity-100 transition-opacity" />
-            <Plus size={18} />
+            <Plus size={16} className="md:w-[18px] md:h-[18px]" />
             <span className="hidden md:inline">NEW NOTE</span>
             <span className="md:hidden">ADD</span>
           </button>
@@ -1792,27 +1808,27 @@ export default function App() {
 
 
       <main 
-        className={`mx-auto pt-[100px] md:pt-[140px] pb-12 relative z-10 min-h-[calc(100vh-140px)] ${viewMode === 'grid' ? 'max-w-[1600px] px-4 md:px-8' : 'w-full'}`}
-        style={viewMode === 'board' ? { minHeight: `${Math.max(600, ...notes.map(n => (n.y || 0) + 400))}px` } : {}}
+        className={`mx-auto pt-[76px] sm:pt-[96px] md:pt-[130px] pb-16 relative z-10 min-h-[calc(100vh-120px)] w-full max-w-full overflow-x-hidden ${isBoardActive ? 'w-full' : 'max-w-[1600px] px-3.5 sm:px-6 md:px-8'}`}
+        style={isBoardActive ? { minHeight: `${Math.max(600, ...notes.map(n => (n.y || 0) + 400))}px` } : {}}
       >
         {notes.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 md:py-32 text-slate-400">
-            <div className="p-6 md:p-8 rounded-full bg-white shadow-inner mb-6 border border-black/5">
-               <Plus className="opacity-20 md:w-12 md:h-12" size={32} />
+          <div className="flex flex-col items-center justify-center py-16 sm:py-24 md:py-32 text-slate-400 px-4">
+            <div className="p-5 sm:p-6 md:p-8 rounded-full bg-white shadow-inner mb-4 sm:mb-6 border border-black/5">
+               <Plus className="opacity-20 w-8 h-8 md:w-12 md:h-12" size={32} />
             </div>
-            <p className="text-lg md:text-xl font-semibold opacity-30 italic text-center px-4">Start your vocal collection...</p>
+            <p className="text-base sm:text-lg md:text-xl font-semibold opacity-30 italic text-center max-w-xs sm:max-w-md">Start your vocal collection...</p>
           </div>
         ) : (
-          <div className={viewMode === 'grid' ? "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6 md:gap-8 items-start" : "relative w-full min-h-[calc(100vh-140px)]"}>
+          <div className={isBoardActive ? "relative w-full min-h-[calc(100vh-140px)]" : "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4 sm:gap-6 md:gap-8 items-start w-full max-w-md sm:max-w-none mx-auto"}>
             <AnimatePresence mode="popLayout">
               {notes.map((note) => (
                 <motion.div
                   key={note.id}
-                  layout={viewMode === 'grid'}
-                  drag={viewMode === 'board'}
+                  layout={!isBoardActive}
+                  drag={isBoardActive}
                   dragMomentum={false}
                   onDragEnd={(_, info) => {
-                    if (viewMode === 'board') {
+                    if (isBoardActive) {
                       updateNotePosition(note.id, note.x + info.offset.x, note.y + info.offset.y);
                     }
                   }}
@@ -1820,21 +1836,21 @@ export default function App() {
                   animate={{ 
                     opacity: 1, 
                     scale: 1, 
-                    x: viewMode === 'board' ? note.x : 0,
-                    y: viewMode === 'board' ? note.y : 0,
-                    rotate: note.rotation 
+                    x: isBoardActive ? note.x : 0, 
+                    y: isBoardActive ? note.y : 0, 
+                    rotate: isMobile ? 0 : note.rotation 
                   }}
                   exit={{ opacity: 0, scale: 0.8 }}
-                  whileHover={{ scale: 1.02, zIndex: 10, y: viewMode === 'grid' ? -8 : (note.y - 8), transition: { duration: 0.2 } }}
+                  whileHover={{ scale: 1.02, zIndex: 10, y: !isBoardActive ? -6 : (note.y - 6), transition: { duration: 0.2 } }}
                   whileDrag={{ scale: 1.1, zIndex: 100, boxShadow: "0 40px 80px rgba(0,0,0,0.2)" }}
                   onClick={() => startEditing(note)}
-                  style={viewMode === 'board' ? { position: 'absolute', top: 0, left: 0 } : {}}
+                  style={isBoardActive ? { position: 'absolute', top: 0, left: 0 } : {}}
                   className={`
-                    relative w-full h-[290px] sm:h-[310px] md:h-[330px] p-5 md:p-[22px] flex flex-col items-start
+                    relative w-full h-[280px] xs:h-[295px] sm:h-[310px] md:h-[330px] max-h-[340px] p-4 sm:p-5 md:p-[22px] flex flex-col items-start
                     note-shadow hover:note-shadow-hover paper-texture
-                    border border-black/5
+                    border border-black/5 rounded-2xl md:rounded-3xl
                     transition-all duration-300 note-corner-fold group overflow-hidden
-                    ${viewMode === 'board' ? '!w-[280px] md:!w-[310px] cursor-grab active:cursor-grabbing' : 'cursor-pointer'}
+                    ${isBoardActive ? '!w-[280px] md:!w-[310px] cursor-grab active:cursor-grabbing' : 'w-full cursor-pointer'}
                     ${note.color}
                     ${note.pattern && note.pattern !== 'none' ? note.pattern : ''}
                     ${note.completed ? 'opacity-80' : ''}
@@ -1904,24 +1920,24 @@ export default function App() {
                     />
                   </div>
                   
-                  <div className="flex items-center justify-end gap-2 pt-2 mt-auto shrink-0 w-full opacity-40 group-hover:opacity-100 transition-all transform translate-y-0 relative z-20 pointer-events-auto border-t border-black/[0.04]">
+                  <div className="flex items-center justify-end gap-1.5 sm:gap-2 pt-2 mt-auto shrink-0 w-full opacity-70 sm:opacity-40 sm:group-hover:opacity-100 transition-all transform translate-y-0 relative z-20 pointer-events-auto border-t border-black/[0.04]">
                     <button
                       onClick={(e) => toggleComplete(note.id, e)}
-                      className={`p-2 rounded-xl transition-colors border border-black/10 ${note.completed ? 'bg-emerald-500 text-white shadow-sm' : 'bg-white/20 hover:bg-emerald-500 hover:text-white text-emerald-600'}`}
+                      className={`min-w-[36px] min-h-[36px] p-2 rounded-xl transition-colors border border-black/10 flex items-center justify-center ${note.completed ? 'bg-emerald-500 text-white shadow-sm' : 'bg-white/20 hover:bg-emerald-500 hover:text-white text-emerald-600'}`}
                       title={note.completed ? "Mark as Incomplete" : "Mark as Completed"}
                     >
                       <Check size={16} />
                     </button>
                     <button
                       onClick={(e) => changeColor(note.id, e)}
-                      className="p-2 rounded-xl bg-white/20 hover:bg-white text-purple-600 transition-colors border border-black/10"
+                      className="min-w-[36px] min-h-[36px] p-2 rounded-xl bg-white/20 hover:bg-white text-purple-600 transition-colors border border-black/10 flex items-center justify-center"
                       title="Warp Spectrum"
                     >
                       <Palette size={16} />
                     </button>
                     <button
                       onClick={(e) => deleteNote(note.id, e)}
-                      className="p-2 rounded-xl bg-white/20 hover:bg-red-500 hover:text-white text-red-500 transition-colors border border-black/10"
+                      className="min-w-[36px] min-h-[36px] p-2 rounded-xl bg-white/20 hover:bg-red-500 hover:text-white text-red-500 transition-colors border border-black/10 flex items-center justify-center"
                       title="Delete"
                     >
                       <Trash2 size={16} />
@@ -1944,29 +1960,29 @@ export default function App() {
             className="fixed inset-0 z-[200] bg-white flex flex-col"
           >
             {/* Editor Header */}
-            <header className="px-4 md:px-8 py-4 md:py-6 flex items-center justify-between border-b border-black/5 bg-white/50 backdrop-blur-xl">
-              <div className="flex items-center gap-2 md:gap-4">
+            <header className="px-3 sm:px-6 md:px-8 py-2.5 sm:py-4 md:py-6 flex items-center justify-between border-b border-black/5 bg-white/70 backdrop-blur-xl shrink-0 min-h-[58px] sm:min-h-[66px]">
+              <div className="flex items-center gap-1.5 sm:gap-3 md:gap-4">
                 <button 
                   onClick={saveNote}
-                  className="p-2 hover:bg-black/5 rounded-full transition-colors text-slate-600"
+                  className="min-w-[38px] min-h-[38px] sm:min-w-[42px] sm:min-h-[42px] p-2 hover:bg-black/5 rounded-full transition-colors text-slate-600 flex items-center justify-center"
                   title="Back"
                 >
                   <ArrowLeft size={20} className="md:w-6 md:h-6" />
                 </button>
-                <div className={`px-3 md:px-4 py-1 md:py-1.5 rounded-full text-[8px] md:text-[10px] font-black uppercase tracking-[0.2em] ${notes.find(n => n.id === activeNoteId)?.color} bg-opacity-40 border border-black/5 shadow-sm`}>
+                <div className={`px-2.5 sm:px-3 md:px-4 py-1 md:py-1.5 rounded-full text-[8px] md:text-[10px] font-black uppercase tracking-[0.2em] ${notes.find(n => n.id === activeNoteId)?.color} bg-opacity-40 border border-black/5 shadow-sm`}>
                   <span className="hidden xs:inline">{isDrawing ? 'Sketching Mode' : 'Writing Mode'}</span>
                   <span className="xs:hidden">{isDrawing ? 'Sketch' : 'Write'}</span>
                 </div>
               </div>
 
-              <div className="flex items-center gap-1 md:gap-2">
+              <div className="flex items-center gap-1 sm:gap-1.5 md:gap-2">
                 {/* Single Pencil Mode Switcher */}
                 <button
                   onClick={() => setIsDrawing(!isDrawing)}
-                  className={`p-2 md:p-3 rounded-xl md:rounded-2xl transition-all ${isDrawing ? 'bg-purple-600 text-white shadow-md' : 'bg-transparent text-slate-500 hover:text-black hover:bg-black/5'}`}
+                  className={`min-w-[38px] min-h-[38px] sm:min-w-[42px] sm:min-h-[42px] p-2 md:p-3 rounded-xl md:rounded-2xl transition-all flex items-center justify-center ${isDrawing ? 'bg-purple-600 text-white shadow-md' : 'bg-transparent text-slate-500 hover:text-black hover:bg-black/5'}`}
                   title={isDrawing ? "Writing Mode" : "Drawing Mode"}
                 >
-                  <Pencil size={20} className="md:w-[22px] md:h-[22px]" />
+                  <Pencil size={18} className="md:w-[22px] md:h-[22px]" />
                 </button>
 
                 <AnimatePresence>
@@ -1975,43 +1991,43 @@ export default function App() {
                       initial={{ opacity: 0, scale: 0.95 }}
                       animate={{ opacity: 1, scale: 1 }}
                       exit={{ opacity: 0, scale: 0.95 }}
-                      className="fixed md:relative bottom-24 md:bottom-auto left-4 right-4 md:left-auto md:right-auto flex items-center justify-center gap-1 bg-white/80 md:bg-slate-50 backdrop-blur-md md:backdrop-blur-none p-2 rounded-[22px] border border-black/10 md:border-black/5 shadow-2xl md:shadow-none z-50 md:z-auto"
+                      className="fixed md:relative bottom-20 md:bottom-auto left-2 right-2 sm:left-4 sm:right-4 md:left-auto md:right-auto flex flex-wrap items-center justify-center gap-1 bg-white/95 md:bg-slate-50 backdrop-blur-md md:backdrop-blur-none p-1.5 sm:p-2 rounded-2xl border border-black/10 md:border-black/5 shadow-2xl md:shadow-none z-50 md:z-auto max-w-[calc(100vw-16px)] mx-auto"
                     >
                       <button
                         onClick={() => setDrawTool('pen')}
-                        className={`p-2.5 rounded-xl transition-all ${drawTool === 'pen' ? 'bg-black text-white' : 'hover:bg-black/5 text-slate-500'}`}
+                        className={`min-w-[38px] min-h-[38px] p-2 rounded-xl transition-all flex items-center justify-center ${drawTool === 'pen' ? 'bg-black text-white' : 'hover:bg-black/5 text-slate-500'}`}
                         title="Pen"
                       >
                         <Pencil size={18} />
                       </button>
                       <button
                         onClick={() => setDrawTool('eraser')}
-                        className={`p-2.5 rounded-xl transition-all ${drawTool === 'eraser' ? 'bg-black text-white' : 'hover:bg-black/5 text-slate-500'}`}
+                        className={`min-w-[38px] min-h-[38px] p-2 rounded-xl transition-all flex items-center justify-center ${drawTool === 'eraser' ? 'bg-black text-white' : 'hover:bg-black/5 text-slate-500'}`}
                         title="Eraser"
                       >
                         <Eraser size={18} />
                       </button>
                       <button
                         onClick={() => setDrawTool('pan')}
-                        className={`p-2.5 rounded-xl transition-all ${drawTool === 'pan' ? 'bg-black text-white' : 'hover:bg-black/5 text-slate-500'}`}
+                        className={`min-w-[38px] min-h-[38px] p-2 rounded-xl transition-all flex items-center justify-center ${drawTool === 'pan' ? 'bg-black text-white' : 'hover:bg-black/5 text-slate-500'}`}
                         title="Pan Tool"
                       >
                         <Hand size={18} />
                       </button>
                       <button
                         onClick={() => { setStageScale(1); setStagePos({ x: 0, y: 0 }); }}
-                        className="hidden md:block p-2.5 rounded-xl hover:bg-black/5 text-slate-400 transition-all"
+                        className="hidden md:flex min-w-[38px] min-h-[38px] p-2 rounded-xl hover:bg-black/5 text-slate-400 transition-all items-center justify-center"
                         title="Reset View"
                       >
                         <Maximize size={18} />
                       </button>
                       <div className="w-px h-6 bg-black/10 mx-1" />
-                      <div className="flex items-center gap-1 md:gap-1.5 px-0.5 max-w-[120px] overflow-x-auto">
+                      <div className="flex items-center gap-1 md:gap-1.5 px-0.5 max-w-[130px] overflow-x-auto">
                         {['#000000', '#ef4444', '#3b82f6', '#10b981', '#f59e0b'].map(c => (
                           <button
                             key={c}
                             onClick={() => { setDrawColor(c); setDrawTool('pen'); }}
-                            className={`w-5 h-5 md:w-6 md:h-6 shrink-0 rounded-full border border-black/10 transition-all hover:scale-110 ${drawColor === c && drawTool === 'pen' ? 'ring-2 ring-black ring-offset-2' : ''}`}
+                            className={`w-6 h-6 shrink-0 rounded-full border border-black/10 transition-all hover:scale-110 ${drawColor === c && drawTool === 'pen' ? 'ring-2 ring-black ring-offset-2' : ''}`}
                             style={{ backgroundColor: c }}
                           />
                         ))}
@@ -2052,19 +2068,20 @@ export default function App() {
                     e.stopPropagation();
                     setIsChatOpen(!isChatOpen);
                   }}
-                  className={`p-2 md:p-3 rounded-xl md:rounded-2xl transition-all ${isChatOpen ? 'bg-blue-600 text-white shadow-md' : 'hover:bg-blue-50 text-slate-400 hover:text-blue-600'}`}
+                  className={`min-w-[38px] min-h-[38px] sm:min-w-[42px] sm:min-h-[42px] p-2 md:p-3 rounded-xl md:rounded-2xl transition-all flex items-center justify-center ${isChatOpen ? 'bg-blue-600 text-white shadow-md' : 'hover:bg-blue-50 text-slate-400 hover:text-blue-600'}`}
                   title="AI Sidebar Chat"
                 >
-                  <MessageCircle size={20} className="md:w-[22px] md:h-[22px]" />
+                  <MessageCircle size={18} className="md:w-[22px] md:h-[22px]" />
                 </button>
 
                 {/* Overflow Menu for smaller screens */}
                 <div className="md:hidden relative">
                    <button
                     onClick={() => setIsEditorMenuOpen(!isEditorMenuOpen)}
-                    className="p-2 rounded-xl bg-black/5 hover:bg-black/10 transition-all"
+                    className="min-w-[38px] min-h-[38px] p-2 rounded-xl bg-black/5 hover:bg-black/10 transition-all flex items-center justify-center"
+                    aria-label="More options"
                   >
-                    <MoreVertical size={20} />
+                    <MoreVertical size={18} />
                   </button>
                   <AnimatePresence>
                     {isEditorMenuOpen && (
@@ -2072,32 +2089,32 @@ export default function App() {
                         initial={{ opacity: 0, y: 10, scale: 0.95 }}
                         animate={{ opacity: 1, y: 0, scale: 1 }}
                         exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                        className="absolute top-full right-0 mt-2 w-48 bg-white border border-black/10 rounded-2xl shadow-2xl z-[300] p-2 overflow-hidden flex flex-col gap-1"
+                        className="absolute top-full right-0 mt-2 w-52 bg-white border border-black/10 rounded-2xl shadow-2xl z-[300] p-1.5 overflow-hidden flex flex-col gap-1"
                       >
                          <button
                           onClick={(e) => { triggerGallery(activeNoteId, e); setIsEditorMenuOpen(false); }}
-                          className="flex items-center gap-3 p-3 rounded-xl hover:bg-black/5 text-slate-600 font-bold text-xs"
+                          className="flex items-center gap-3 p-3 rounded-xl hover:bg-black/5 text-slate-700 font-bold text-xs min-h-[44px]"
                         >
                           <ImageIcon size={18} />
                           <span>Gallery</span>
                         </button>
                         <button
                           onClick={(e) => { startVoiceRecording('note', e); setIsEditorMenuOpen(false); }}
-                          className="flex items-center gap-3 p-3 rounded-xl hover:bg-black/5 text-slate-600 font-bold text-xs"
+                          className="flex items-center gap-3 p-3 rounded-xl hover:bg-black/5 text-slate-700 font-bold text-xs min-h-[44px]"
                         >
                           <Mic size={18} />
                           <span>Voice Input</span>
                         </button>
                          <button
                           onClick={(e) => { changeColor(activeNoteId!, e); setIsEditorMenuOpen(false); }}
-                          className="flex items-center gap-3 p-3 rounded-xl hover:bg-black/5 text-slate-600 font-bold text-xs"
+                          className="flex items-center gap-3 p-3 rounded-xl hover:bg-black/5 text-slate-700 font-bold text-xs min-h-[44px]"
                         >
                           <Palette size={18} />
                           <span>Theme Note</span>
                         </button>
                         <button
                           onClick={(e) => { deleteNote(activeNoteId!, e); setIsEditorMenuOpen(false); }}
-                          className="flex items-center gap-3 p-3 rounded-xl hover:bg-red-50 text-red-500 font-bold text-xs"
+                          className="flex items-center gap-3 p-3 rounded-xl hover:bg-red-50 text-red-500 font-bold text-xs min-h-[44px]"
                         >
                           <Trash2 size={18} />
                           <span>Delete</span>
@@ -2147,10 +2164,10 @@ export default function App() {
 
                 <button
                   onClick={saveNote}
-                  className="p-2 md:p-3 bg-black text-white rounded-xl md:rounded-2xl hover:bg-slate-800 transition-all shadow-lg ml-1 md:ml-2"
+                  className="min-w-[38px] min-h-[38px] sm:min-w-[42px] sm:min-h-[42px] p-2 md:p-3 bg-black text-white rounded-xl md:rounded-2xl hover:bg-slate-800 transition-all shadow-md ml-1 md:ml-2 flex items-center justify-center"
                   title="Save & Close"
                 >
-                  <CheckCircle2 size={20} className="md:w-[22px] md:h-[22px]" />
+                  <CheckCircle2 size={18} className="md:w-[22px] md:h-[22px]" />
                 </button>
               </div>
             </header>
@@ -2159,7 +2176,7 @@ export default function App() {
             {/* Hybrid Note Editor Body & Sidebar AI */}
             <div className="flex-1 flex overflow-hidden">
               <div className={`flex-1 relative overflow-hidden flex flex-col transition-all duration-500 ${notes.find(n => n.id === activeNoteId)?.color}`}>
-                <div className="flex-1 w-full max-w-5xl mx-auto p-6 md:p-12 lg:p-24 relative flex flex-col">
+                <div className="flex-1 w-full max-w-5xl mx-auto p-4 sm:p-6 md:p-12 lg:p-24 relative flex flex-col min-h-0 overflow-y-auto">
                   
                   {/* Voice Dictation Active Banner */}
                   {isRecording && (
@@ -2167,11 +2184,11 @@ export default function App() {
                       initial={{ opacity: 0, y: -10 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -10 }}
-                      className="mb-6 mx-auto px-4 py-2 bg-slate-900/90 backdrop-blur-md text-white text-xs rounded-2xl shadow-xl flex flex-wrap items-center justify-center gap-2 border border-white/10 z-30"
+                      className="mb-4 mx-auto px-3.5 py-2 bg-slate-900/95 backdrop-blur-md text-white text-xs rounded-2xl shadow-xl flex flex-wrap items-center justify-center gap-2 border border-white/10 z-30 max-w-full text-center"
                     >
-                      <div className="w-2 h-2 rounded-full bg-red-500 animate-ping shrink-0" />
-                      <span className="font-bold tracking-wider uppercase text-[9px] text-red-400">Listening:</span>
-                      <span className="text-slate-300 text-[11px]">
+                      <div className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping shrink-0" />
+                      <span className="font-bold tracking-wider uppercase text-[10px] text-red-400">Listening:</span>
+                      <span className="text-slate-300 text-xs">
                         Say <span className="text-white font-semibold">"bold [words]"</span>, <span className="text-white font-semibold">"underline [words]"</span>, <span className="text-white font-semibold">"period"</span>, <span className="text-white font-semibold">"comma"</span>, <span className="text-white font-semibold">"question mark"</span>, <span className="text-white font-semibold">"new line"</span>
                       </span>
                     </motion.div>
@@ -2179,17 +2196,17 @@ export default function App() {
                   
                   {/* Photo Layer */}
                   {notes.find(n => n.id === activeNoteId)?.image && (
-                    <div className="relative mb-8 group shrink-0 z-10 w-full max-w-2xl mx-auto">
+                    <div className="relative mb-4 sm:mb-6 group shrink-0 z-10 w-full max-w-2xl mx-auto">
                       <img 
                         src={notes.find(n => n.id === activeNoteId)?.image} 
-                        className="w-full max-h-[30vh] object-contain rounded-2xl shadow-xl transition-all"
+                        className="w-full max-h-[25vh] sm:max-h-[30vh] object-contain rounded-2xl shadow-xl transition-all"
                         referrerPolicy="no-referrer"
                       />
                       <button 
                         onClick={() => removeImage(activeNoteId)}
-                        className="absolute top-4 right-4 p-2 bg-black/50 text-white rounded-full hover:bg-black transition-colors"
+                        className="absolute top-3 right-3 min-w-[36px] min-h-[36px] p-2 bg-black/60 text-white rounded-full hover:bg-black transition-colors flex items-center justify-center"
                       >
-                        <X size={20} />
+                        <X size={18} />
                       </button>
                     </div>
                   )}
@@ -2242,20 +2259,20 @@ export default function App() {
                     onMouseUp={checkSelection}
                     onFocus={checkSelection}
                     style={{ 
-                      fontSize: `${editFontSize}px`,
+                      fontSize: `${isMobile ? Math.min(28, Math.max(16, editFontSize * 0.65)) : editFontSize}px`,
                       fontWeight: 500
                     }}
-                    className={`flex-1 w-full bg-transparent focus:outline-none leading-[1.3] text-[#333] note-content z-10 relative overflow-y-auto whitespace-pre-wrap ${isDrawing ? 'pointer-events-none' : 'pointer-events-auto'}`}
+                    className={`flex-1 w-full bg-transparent focus:outline-none leading-[1.35] text-[#333] note-content z-10 relative overflow-y-auto whitespace-pre-wrap ${isDrawing ? 'pointer-events-none' : 'pointer-events-auto'} min-h-[160px] pb-16`}
                   />
                   
                   {/* Character Count */}
-                  <div className="absolute bottom-10 right-10 z-30 flex items-center gap-2 px-4 py-2 bg-black text-white rounded-full text-[9px] font-black tracking-[0.2em] shadow-xl pointer-events-none opacity-40 group-hover:opacity-100 transition-opacity">
+                  <div className="absolute bottom-4 right-4 sm:bottom-6 sm:right-6 md:bottom-10 md:right-10 z-30 flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-1.5 sm:py-2 bg-black text-white rounded-full text-[9px] font-black tracking-[0.2em] shadow-xl pointer-events-none opacity-40 group-hover:opacity-100 transition-opacity">
                     <span>{editContent.replace(/<[^>]*>/g, '').length}</span>
                     <div className="w-px h-2 bg-white/20" />
                     <span>{MAX_CHARS}</span>
                   </div>
                   {(editContent === '' || editContent === '<br>') && (
-                    <div className="absolute top-0 left-0 text-slate-300 pointer-events-none italic opacity-50" style={{ fontSize: `${editFontSize}px` }}>
+                    <div className="absolute top-0 left-0 text-slate-300 pointer-events-none italic opacity-50" style={{ fontSize: `${isMobile ? Math.min(28, Math.max(16, editFontSize * 0.65)) : editFontSize}px` }}>
                       Type your thoughts...
                     </div>
                   )}
@@ -2373,18 +2390,18 @@ export default function App() {
                         <motion.div 
                           initial={{ opacity: 0, scale: 0.95 }}
                           animate={{ opacity: 1, scale: 1 }}
-                          className="absolute inset-x-4 md:inset-x-6 bottom-4 md:bottom-6 bg-slate-900/95 backdrop-blur-2xl border border-white/10 p-6 md:p-8 rounded-[24px] md:rounded-[32px] z-50 flex flex-col items-center justify-center text-white shadow-2xl"
+                          className="absolute inset-x-3 sm:inset-x-6 bottom-3 sm:bottom-6 bg-slate-900/95 backdrop-blur-2xl border border-white/10 p-5 sm:p-6 md:p-8 rounded-[24px] md:rounded-[32px] z-50 flex flex-col items-center justify-center text-white shadow-2xl max-w-full"
                         >
-                          <div className="bg-indigo-600 p-4 md:p-6 rounded-full mb-4 animate-pulse shadow-[0_0_30px_rgba(79,70,229,0.3)]">
+                          <div className="bg-indigo-600 p-3.5 sm:p-5 rounded-full mb-3 sm:mb-4 animate-pulse shadow-[0_0_30px_rgba(79,70,229,0.3)]">
                             <Mic size={24} className="md:w-8 md:h-8 text-white" />
                           </div>
-                          <span className="tracking-[0.3em] uppercase text-[9px] md:text-[10px] font-black text-white/40 mb-2">Engine Listening...</span>
-                          <p className="text-[11px] text-indigo-300 font-medium mb-5 text-center max-w-xs">
-                            Speak formatting & punctuation: <span className="text-white font-semibold">"bold [words]"</span>, <span className="text-white font-semibold">"underline [words]"</span>, <span className="text-white font-semibold">"period"</span>, <span className="text-white font-semibold">"comma"</span>, <span className="text-white font-semibold">"question mark"</span>, <span className="text-white font-semibold">"new line"</span>
+                          <span className="tracking-[0.25em] uppercase text-[9px] md:text-[10px] font-black text-white/50 mb-1.5">Engine Listening...</span>
+                          <p className="text-[11px] sm:text-xs text-indigo-300 font-medium mb-4 text-center max-w-xs leading-relaxed">
+                            Speak formatting & punctuation: <span className="text-white font-semibold">"bold [words]"</span>, <span className="text-white font-semibold">"underline [words]"</span>, <span className="text-white font-semibold">"period"</span>, <span className="text-white font-semibold">"comma"</span>, <span className="text-white font-semibold">"new line"</span>
                           </p>
                           <button 
                             onClick={() => recognitionRef.current?.stop()}
-                            className="w-full px-8 py-3 bg-white text-slate-950 rounded-xl md:rounded-2xl text-[10px] md:text-[11px] font-black uppercase tracking-widest hover:bg-slate-100 transition-all shadow-lg active:scale-95"
+                            className="w-full min-h-[44px] px-6 py-3 bg-white text-slate-950 rounded-xl md:rounded-2xl text-[11px] font-black uppercase tracking-widest hover:bg-slate-100 transition-all shadow-lg active:scale-95 flex items-center justify-center"
                           >
                             Stop Engine
                           </button>
@@ -2394,7 +2411,7 @@ export default function App() {
                       <div ref={chatEndRef} />
                     </div>
 
-                    <div className="p-6 md:p-8 bg-slate-900 border-t border-white/5 flex flex-col gap-4">
+                    <div className="p-3.5 sm:p-5 md:p-8 bg-slate-900 border-t border-white/5 flex flex-col gap-3 sm:gap-4 shrink-0">
                       <div className="flex items-center gap-2">
                         <input
                           type="text"
@@ -2403,12 +2420,12 @@ export default function App() {
                           onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
                           placeholder={isRecording ? "Listening..." : "Message Vocal..."}
                           disabled={isRecording}
-                          className="flex-1 bg-white/5 border border-white/5 rounded-xl md:rounded-2xl px-4 md:px-6 py-3 md:py-4 text-[14px] md:text-[15px] text-white placeholder:text-white/20 focus:ring-2 focus:ring-indigo-500/50 outline-none disabled:opacity-50 transition-all font-medium"
+                          className="flex-1 bg-white/5 border border-white/5 rounded-xl md:rounded-2xl px-3.5 sm:px-6 py-2.5 sm:py-4 text-sm md:text-[15px] text-white placeholder:text-white/20 focus:ring-2 focus:ring-indigo-500/50 outline-none disabled:opacity-50 transition-all font-medium min-h-[44px]"
                         />
                         <button
                           onClick={(e) => startVoiceRecording('chat', e)}
                           disabled={isLoading}
-                          className={`p-3 md:p-4 rounded-xl md:rounded-2xl transition-all transform active:scale-95 ${
+                          className={`min-w-[44px] min-h-[44px] p-2.5 md:p-4 rounded-xl md:rounded-2xl transition-all transform active:scale-95 flex items-center justify-center ${
                             isRecording 
                               ? 'bg-red-500 text-white animate-pulse' 
                               : micPermissionStatus === 'denied'
@@ -2423,7 +2440,7 @@ export default function App() {
                       <button
                         onClick={handleSendMessage}
                         disabled={isLoading || !chatInput.trim() || isRecording}
-                        className="w-full py-3 md:py-4 bg-white text-slate-950 rounded-xl md:rounded-2xl font-black uppercase tracking-widest text-[10px] md:text-[11px] disabled:opacity-10 disabled:cursor-not-allowed transform active:scale-[0.98] transition-all flex items-center justify-center gap-2 shadow-2xl hover:bg-slate-50"
+                        className="w-full min-h-[44px] py-2.5 sm:py-3.5 md:py-4 bg-white text-slate-950 rounded-xl md:rounded-2xl font-black uppercase tracking-widest text-[11px] md:text-[11px] disabled:opacity-10 disabled:cursor-not-allowed transform active:scale-[0.98] transition-all flex items-center justify-center gap-2 shadow-2xl hover:bg-slate-50"
                       >
                         <Send size={14} />
                         <span>REPLY</span>
@@ -2441,7 +2458,7 @@ export default function App() {
       {/* Templates Modal */}
       <AnimatePresence>
         {isTemplatesModalOpen && (
-          <div className="fixed inset-0 z-[1000] flex items-center justify-center p-6">
+          <div className="fixed inset-0 z-[1000] flex items-center justify-center p-3 sm:p-6">
             <motion.div 
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -2453,55 +2470,55 @@ export default function App() {
               initial={{ opacity: 0, scale: 0.9, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9, y: 20 }}
-              className="relative w-full max-w-4xl bg-white md:rounded-[40px] shadow-2xl overflow-hidden flex flex-col h-full md:max-h-[80vh]"
+              className="relative w-full max-w-4xl bg-white rounded-2xl md:rounded-[40px] shadow-2xl overflow-hidden flex flex-col h-[90vh] md:max-h-[80vh]"
             >
-              <div className="px-6 md:px-12 py-6 md:py-8 flex items-center justify-between border-b border-black/5 shrink-0">
+              <div className="px-4 sm:px-8 md:px-12 py-3.5 sm:py-6 md:py-8 flex items-center justify-between border-b border-black/5 shrink-0">
                 <div>
-                  <h2 className="text-xl md:text-3xl font-black tracking-tight">Templates</h2>
-                  <p className="hidden md:block text-slate-400 font-medium">Quick start your thoughts</p>
+                  <h2 className="text-lg sm:text-2xl md:text-3xl font-black tracking-tight">Templates</h2>
+                  <p className="hidden xs:block text-xs sm:text-sm text-slate-400 font-medium">Quick start your thoughts</p>
                 </div>
                 <div className="flex items-center gap-2 md:gap-4">
                   <button
                     onClick={() => generateAIContent('template')}
-                    className="flex items-center gap-2 px-4 md:px-6 py-2.5 md:py-3 bg-indigo-600 text-white rounded-xl md:rounded-2xl hover:bg-indigo-700 transition-all shadow-md font-bold text-xs md:text-sm"
+                    className="flex items-center gap-1.5 sm:gap-2 px-3 sm:px-5 py-2 sm:py-2.5 md:py-3 bg-indigo-600 text-white rounded-xl md:rounded-2xl hover:bg-indigo-700 transition-all shadow-md font-bold text-xs md:text-sm min-h-[38px] sm:min-h-[42px]"
                   >
-                    <Wand2 size={18} className="md:w-5 md:h-5" />
+                    <Wand2 size={16} className="md:w-5 md:h-5" />
                     <span>AI Generate</span>
                   </button>
                   <button 
                     onClick={() => setIsTemplatesModalOpen(false)}
-                    className="p-2 md:p-3 hover:bg-slate-100 rounded-full transition-colors"
+                    className="min-w-[38px] min-h-[38px] p-2 md:p-3 hover:bg-slate-100 rounded-full transition-colors flex items-center justify-center text-slate-500"
                   >
-                    <X size={24} />
+                    <X size={20} className="md:w-6 md:h-6" />
                   </button>
                 </div>
               </div>
 
-              <div className="p-6 md:p-12 overflow-y-auto">
+              <div className="p-4 sm:p-8 md:p-12 overflow-y-auto flex-1">
                 {templates.length === 0 ? (
-                  <div className="py-20 text-center text-slate-300">
-                    <Sparkles className="mx-auto mb-4 opacity-20" size={64} />
-                    <p className="text-lg md:text-xl italic font-medium">No templates saved yet.</p>
+                  <div className="py-16 sm:py-20 text-center text-slate-300">
+                    <Sparkles className="mx-auto mb-4 opacity-20" size={56} />
+                    <p className="text-base sm:text-lg md:text-xl italic font-medium">No templates saved yet.</p>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 md:gap-6">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-5 md:gap-6">
                     {templates.map(template => (
                       <div 
                         key={template.id}
                         onClick={() => applyTemplate(template)}
-                        className={`group relative p-8 rounded-3xl cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98] shadow-lg border border-black/5 ${template.color}`}
+                        className={`group relative p-5 sm:p-8 rounded-2xl sm:rounded-3xl cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98] shadow-md sm:shadow-lg border border-black/5 ${template.color}`}
                       >
-                        <div className="flex justify-between items-start mb-4">
-                          <h3 className="font-bold text-lg truncate pr-8">{template.name}</h3>
+                        <div className="flex justify-between items-start mb-3 sm:mb-4">
+                          <h3 className="font-bold text-base sm:text-lg truncate pr-6 sm:pr-8">{template.name}</h3>
                           <button 
                             onClick={(e) => deleteTemplate(template.id, e)}
-                            className="opacity-0 group-hover:opacity-100 p-2 hover:bg-black/10 rounded-full transition-all"
+                            className="opacity-70 sm:opacity-0 sm:group-hover:opacity-100 min-w-[32px] min-h-[32px] p-1.5 hover:bg-black/10 rounded-full transition-all flex items-center justify-center"
                           >
                             <Trash2 size={16} className="text-black/60" />
                           </button>
                         </div>
-                        <p className="text-sm opacity-60 line-clamp-3 leading-relaxed note-content" dangerouslySetInnerHTML={{ __html: template.content || "Visual Template" }} />
-                        <div className="mt-6 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest bg-black/5 px-3 py-1 rounded-full w-fit">
+                        <p className="text-xs sm:text-sm opacity-60 line-clamp-3 leading-relaxed note-content" dangerouslySetInnerHTML={{ __html: template.content || "Visual Template" }} />
+                        <div className="mt-4 sm:mt-6 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest bg-black/5 px-2.5 sm:px-3 py-1 rounded-full w-fit">
                           {template.drawingLines?.length ? 'Sketch' : template.image ? 'Media' : 'Text'}
                         </div>
                       </div>

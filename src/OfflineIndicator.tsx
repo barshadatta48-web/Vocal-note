@@ -27,7 +27,7 @@ export const OfflineIndicator: React.FC = () => {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: 20 }}
-          className="fixed bottom-4 left-4 z-[999] flex items-center gap-2 rounded-2xl bg-amber-600/95 backdrop-blur-md px-3.5 py-2 text-xs font-bold text-white shadow-xl border border-white/20"
+          className="fixed bottom-4 left-3 sm:left-4 z-[999] flex items-center gap-2 rounded-2xl bg-amber-600/95 backdrop-blur-md px-3.5 py-2 text-xs font-bold text-white shadow-xl border border-white/20 max-w-[calc(100vw-24px)]"
         >
           <WifiOff size={14} className="animate-pulse" />
           <span>Offline Mode — Cached notes available</span>

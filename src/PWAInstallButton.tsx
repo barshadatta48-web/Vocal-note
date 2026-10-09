@@ -17,7 +17,7 @@ export const PWAInstallButton: React.FC = () => {
     return (
       <button
         onClick={install}
-        className="p-2 md:px-3 md:py-2.5 rounded-xl md:rounded-2xl transition-all bg-teal-600 hover:bg-teal-700 text-white shadow-sm flex items-center gap-1.5 text-xs font-bold shrink-0"
+        className="min-w-[34px] min-h-[34px] sm:min-w-[38px] sm:min-h-[38px] p-1.5 sm:p-2 md:px-3 md:py-2.5 rounded-xl md:rounded-2xl transition-all bg-teal-600 hover:bg-teal-700 text-white shadow-sm flex items-center justify-center gap-1.5 text-xs font-bold shrink-0"
         title="Install Vocal Note App"
         aria-label="Install Vocal Note as App"
       >
@@ -33,7 +33,7 @@ export const PWAInstallButton: React.FC = () => {
       <>
         <button
           onClick={() => setShowIOSGuide(true)}
-          className="p-2 md:px-3 md:py-2.5 rounded-xl md:rounded-2xl transition-all bg-black/5 hover:bg-black/10 text-slate-700 border border-black/5 flex items-center gap-1.5 text-xs font-bold shrink-0"
+          className="min-w-[34px] min-h-[34px] sm:min-w-[38px] sm:min-h-[38px] p-1.5 sm:p-2 md:px-3 md:py-2.5 rounded-xl md:rounded-2xl transition-all bg-black/5 hover:bg-black/10 text-slate-700 border border-black/5 flex items-center justify-center gap-1.5 text-xs font-bold shrink-0"
           title="Install on iPhone / iPad"
           aria-label="Install on iPhone / iPad"
         >
