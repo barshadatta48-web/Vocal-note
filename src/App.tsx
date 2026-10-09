@@ -53,7 +53,10 @@ interface ChatMessage {
 
 declare global {
   interface Window {
+    SpeechRecognition: any;
     webkitSpeechRecognition: any;
+    mozSpeechRecognition?: any;
+    msSpeechRecognition?: any;
   }
 }
 
@@ -421,7 +424,14 @@ export default function App() {
 
   // Voice state
   const [isRecording, setIsRecording] = useState(false);
+  const [liveInterimText, setLiveInterimText] = useState('');
   const recognitionRef = useRef<any>(null);
+  const shouldKeepRecordingRef = useRef(false);
+  const restartTimerRef = useRef<any>(null);
+  const currentTargetRef = useRef<'note' | 'chat'>('note');
+  const committedChatPrefixRef = useRef('');
+  const committedNoteHtmlRef = useRef('');
+  const liveInterimRef = useRef('');
 
   // Drawing state
   const [isDrawing, setIsDrawing] = useState(false);
@@ -705,12 +715,352 @@ export default function App() {
     setTemplates(templates.filter(t => t.id !== id));
   };
 
+  // ==========================================
+  // CROSS-PLATFORM REAL-TIME SPEECH ENGINE
+  // ==========================================
+  const getSpeechRecognitionClass = () => {
+    if (typeof window === 'undefined') return null;
+    return (window as any).SpeechRecognition || 
+           (window as any).webkitSpeechRecognition || 
+           (window as any).mozSpeechRecognition || 
+           (window as any).msSpeechRecognition || 
+           null;
+  };
+
+  const requestMicrophoneAccessFallback = async (): Promise<boolean> => {
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      return false;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach(track => track.stop());
+      setMicPermissionStatus('granted');
+      setMicErrorMessage(null);
+      return true;
+    } catch (err: any) {
+      console.warn("Microphone fallback permission request failed:", err);
+      setMicPermissionStatus('denied');
+      setMicErrorMessage(err?.message || err?.name || 'Microphone access denied');
+      return false;
+    }
+  };
+
+  const stopVoiceRecording = () => {
+    shouldKeepRecordingRef.current = false;
+    if (restartTimerRef.current) {
+      clearTimeout(restartTimerRef.current);
+      restartTimerRef.current = null;
+    }
+    if (recognitionRef.current) {
+      try {
+        if (typeof recognitionRef.current.abort === 'function') {
+          recognitionRef.current.abort();
+        } else if (typeof recognitionRef.current.stop === 'function') {
+          recognitionRef.current.stop();
+        }
+      } catch {
+        // ignore
+      }
+      recognitionRef.current = null;
+    }
+    setIsRecording(false);
+    setLiveInterimText('');
+    liveInterimRef.current = '';
+
+    // Remove any live interim span inside note editor
+    if (editorRef.current) {
+      const interimEl = editorRef.current.querySelector('#voice-interim-text');
+      if (interimEl) {
+        interimEl.remove();
+        normalizeEditorUnderlines(editorRef.current);
+        setEditContent(editorRef.current.innerHTML);
+      }
+    }
+  };
+
+  const startRecognitionSession = (target: 'chat' | 'note') => {
+    const SpeechRecognitionClass = getSpeechRecognitionClass();
+    if (!SpeechRecognitionClass) {
+      alert("Voice recognition is not supported in this browser. Please try Chrome, Edge, or Safari on iOS/Mac.");
+      shouldKeepRecordingRef.current = false;
+      setIsRecording(false);
+      return;
+    }
+
+    // Clean up previous instance cleanly
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.onstart = null;
+        recognitionRef.current.onresult = null;
+        recognitionRef.current.onerror = null;
+        recognitionRef.current.onend = null;
+        recognitionRef.current.abort();
+      } catch {
+        // ignore
+      }
+      recognitionRef.current = null;
+    }
+
+    const recognition = new SpeechRecognitionClass();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+    recognition.maxAlternatives = 1;
+
+    recognition.onstart = () => {
+      setIsRecording(true);
+      setMicPermissionStatus('granted');
+      setMicErrorMessage(null);
+      if (target === 'chat') {
+        setIsChatOpen(true);
+        setIsHeaderMenuOpen(false);
+      }
+    };
+
+    recognition.onresult = (event: any) => {
+      let interimTranscript = '';
+      let finalChunk = '';
+
+      for (let i = event.resultIndex; i < event.results.length; ++i) {
+        const res = event.results[i];
+        const text = res[0].transcript;
+        if (res.isFinal) {
+          finalChunk += text;
+        } else {
+          interimTranscript += text;
+        }
+      }
+
+      const cleanInterim = interimTranscript.trim();
+      setLiveInterimText(cleanInterim);
+      liveInterimRef.current = cleanInterim;
+
+      if (target === 'chat') {
+        if (finalChunk.trim()) {
+          const cleanFinal = postProcessSpeechTranscript(finalChunk.trim(), false);
+          setChatInput(prev => {
+            const base = committedChatPrefixRef.current || prev;
+            const needsSpace = base.length > 0 && 
+              !base.endsWith(' ') && 
+              !base.endsWith('\n') && 
+              !cleanFinal.startsWith('\n') && 
+              !/^[.,!?:;]/.test(cleanFinal);
+            const next = base + (needsSpace ? ' ' : '') + cleanFinal;
+            committedChatPrefixRef.current = next;
+            return next.slice(0, MAX_CHARS);
+          });
+          setLiveInterimText('');
+          liveInterimRef.current = '';
+        } else if (cleanInterim) {
+          // Instantly display interim words in chat input as user speaks
+          const base = committedChatPrefixRef.current;
+          const needsSpace = base.length > 0 && !base.endsWith(' ') && !base.endsWith('\n');
+          const preview = base + (needsSpace ? ' ' : '') + cleanInterim;
+          setChatInput(preview.slice(0, MAX_CHARS));
+        }
+      } else {
+        // target === 'note'
+        if (finalChunk.trim()) {
+          const isHtml = true;
+          const cleanFinal = postProcessSpeechTranscript(finalChunk.trim(), isHtml);
+          const formattedHtml = cleanFinal.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
+
+          if (editorRef.current) {
+            const interimEl = editorRef.current.querySelector('#voice-interim-text');
+            if (interimEl) interimEl.remove();
+
+            const content = editorRef.current.innerHTML;
+            const needsSpace = content.length > 0 && 
+              !content.endsWith('<br>') && 
+              !content.endsWith(' ') && 
+              !cleanFinal.startsWith('<br>') && 
+              !/^[.,!?:;]/.test(cleanFinal);
+            const spacer = needsSpace ? ' ' : '';
+            editorRef.current.innerHTML = content + spacer + formattedHtml;
+            normalizeEditorUnderlines(editorRef.current);
+            setEditContent(editorRef.current.innerHTML);
+            committedNoteHtmlRef.current = editorRef.current.innerHTML;
+            editorRef.current.scrollTop = editorRef.current.scrollHeight;
+          } else {
+            setEditContent(prev => {
+              const needsSpace = prev.length > 0 && 
+                !prev.endsWith('<br>') && 
+                !prev.endsWith(' ') && 
+                !cleanFinal.startsWith('<br>') && 
+                !/^[.,!?:;]/.test(cleanFinal);
+              const spacer = needsSpace ? ' ' : '';
+              const next = prev + spacer + formattedHtml;
+              committedNoteHtmlRef.current = next;
+              return next.slice(0, MAX_CHARS);
+            });
+          }
+          setLiveInterimText('');
+          liveInterimRef.current = '';
+        } else if (cleanInterim) {
+          // Instantly display interim spoken words inside note editor
+          if (editorRef.current) {
+            let interimEl = editorRef.current.querySelector('#voice-interim-text') as HTMLElement | null;
+            if (!interimEl) {
+              interimEl = document.createElement('span');
+              interimEl.id = 'voice-interim-text';
+              interimEl.className = 'text-indigo-600 dark:text-indigo-400 font-medium italic opacity-85 underline decoration-indigo-300 decoration-wavy transition-opacity';
+              const text = editorRef.current.innerText || '';
+              if (text.length > 0 && !text.endsWith(' ') && !text.endsWith('\n')) {
+                editorRef.current.appendChild(document.createTextNode(' '));
+              }
+              editorRef.current.appendChild(interimEl);
+            }
+            interimEl.textContent = cleanInterim;
+            editorRef.current.scrollTop = editorRef.current.scrollHeight;
+          }
+        }
+      }
+    };
+
+    recognition.onerror = (event: any) => {
+      const err = event.error;
+      console.warn("Speech recognition error:", err);
+
+      if (err === 'no-speech') {
+        // Normal during user thinking pauses; let continuous loop handle it
+        return;
+      }
+      if (err === 'aborted') {
+        return;
+      }
+      if (err === 'not-allowed' || err === 'service-not-allowed') {
+        shouldKeepRecordingRef.current = false;
+        setIsRecording(false);
+        setLiveInterimText('');
+        liveInterimRef.current = '';
+        setMicPermissionStatus('denied');
+        setMicErrorMessage('Microphone access blocked');
+        alert("Microphone access is blocked.\n\nPlease check browser permissions in the address bar and allow microphone access.");
+        return;
+      }
+      if (err === 'audio-capture') {
+        shouldKeepRecordingRef.current = false;
+        setIsRecording(false);
+        setLiveInterimText('');
+        liveInterimRef.current = '';
+        alert("No microphone found. Please connect an audio input device.");
+        return;
+      }
+    };
+
+    recognition.onend = async () => {
+      // Continuous listening loop: automatically restart on pause if user hasn't explicitly stopped
+      if (shouldKeepRecordingRef.current) {
+        setLiveInterimText('');
+        liveInterimRef.current = '';
+        if (editorRef.current) {
+          const interimEl = editorRef.current.querySelector('#voice-interim-text');
+          if (interimEl) interimEl.remove();
+        }
+
+        if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
+        restartTimerRef.current = setTimeout(() => {
+          if (shouldKeepRecordingRef.current) {
+            startRecognitionSession(currentTargetRef.current);
+          }
+        }, 120);
+        return;
+      }
+
+      // Explicit stop
+      setIsRecording(false);
+      setLiveInterimText('');
+      liveInterimRef.current = '';
+      if (editorRef.current) {
+        const interimEl = editorRef.current.querySelector('#voice-interim-text');
+        if (interimEl) interimEl.remove();
+      }
+
+      // AI polish if note dictation had punctuation commands
+      if (target === 'note' && editorRef.current && activeNoteId) {
+        const currentHtml = editorRef.current.innerHTML;
+        if (/\b(?:period|comma|question\s+mark|exclamation\s+(?:mark|point)|new\s+line|next\s+line|colon|semicolon|full\s+stop)\b/i.test(currentHtml)) {
+          const polished = await aiPostProcessSpeech(currentHtml, true);
+          if (polished && polished !== currentHtml && editorRef.current) {
+            editorRef.current.innerHTML = polished;
+            setEditContent(polished);
+            setNotes(prev => prev.map(n => n.id === activeNoteId ? { ...n, content: polished } : n));
+          }
+        }
+      }
+    };
+
+    recognitionRef.current = recognition;
+
+    try {
+      recognition.start();
+    } catch (err) {
+      console.error("Error executing recognition.start():", err);
+      if (shouldKeepRecordingRef.current) {
+        if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
+        restartTimerRef.current = setTimeout(() => {
+          if (shouldKeepRecordingRef.current) {
+            startRecognitionSession(currentTargetRef.current);
+          }
+        }, 200);
+      } else {
+        setIsRecording(false);
+      }
+    }
+  };
+
+  const startVoiceRecording = async (target: 'chat' | 'note' = 'chat', e?: React.MouseEvent) => {
+    e?.stopPropagation();
+
+    // Toggle OFF if already recording
+    if (isRecording || shouldKeepRecordingRef.current) {
+      stopVoiceRecording();
+      return;
+    }
+
+    const SpeechRecognitionClass = getSpeechRecognitionClass();
+    if (!SpeechRecognitionClass) {
+      alert("Voice recognition is not supported in this browser. Please try Chrome, Edge, or Safari.");
+      return;
+    }
+
+    if (micPermissionStatus === 'denied') {
+      const granted = await requestMicrophoneAccessFallback();
+      if (!granted) {
+        alert("Microphone access is blocked.\n\nIMPORTANT:\n1. Tap the Lock icon 🔒 in the address bar.\n2. Set 'Microphone' to ALLOW.\n3. Refresh and try again.");
+        return;
+      }
+    }
+
+    // Set baseline strings
+    if (target === 'chat') {
+      committedChatPrefixRef.current = chatInput;
+    } else {
+      if (editorRef.current) {
+        const interimEl = editorRef.current.querySelector('#voice-interim-text');
+        if (interimEl) interimEl.remove();
+        committedNoteHtmlRef.current = editorRef.current.innerHTML;
+      } else {
+        committedNoteHtmlRef.current = editContent;
+      }
+    }
+
+    shouldKeepRecordingRef.current = true;
+    currentTargetRef.current = target;
+    setLiveInterimText('');
+    liveInterimRef.current = '';
+
+    // Directly trigger inside user gesture (vital for mobile browsers & Safari)
+    startRecognitionSession(target);
+  };
+
   const deleteNote = (id: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
-    setNotes(notes.filter((n) => n.id !== id));
     if (activeNoteId === id) {
+      stopVoiceRecording();
       setActiveNoteId(null);
     }
+    setNotes(notes.filter((n) => n.id !== id));
     setOpenMenuId(null);
   };
 
@@ -748,6 +1098,9 @@ export default function App() {
 
   const startEditing = (note: Note, e?: React.MouseEvent) => {
     e?.stopPropagation();
+    if (isRecording || shouldKeepRecordingRef.current) {
+      stopVoiceRecording();
+    }
     setActiveNoteId(note.id);
     setIsDrawing(false);
     setEditContent(note.content);
@@ -762,6 +1115,9 @@ export default function App() {
 
   const startDrawing = (note: Note, e?: React.MouseEvent) => {
     e?.stopPropagation();
+    if (isRecording || shouldKeepRecordingRef.current) {
+      stopVoiceRecording();
+    }
     setActiveNoteId(note.id);
     setIsDrawing(true);
     setEditContent(note.content);
@@ -776,6 +1132,9 @@ export default function App() {
 
   const saveNote = () => {
     if (activeNoteId) {
+      if (isRecording || shouldKeepRecordingRef.current) {
+        stopVoiceRecording();
+      }
       setNotes(
         notes.map((n) =>
           n.id === activeNoteId ? { ...n, content: editContent, fontSize: editFontSize, updatedAt: Date.now() } : n
@@ -1134,153 +1493,6 @@ export default function App() {
   const toggleMenu = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     setOpenMenuId(openMenuId === id ? null : id);
-  };
-
-  const startVoiceRecording = async (target: 'chat' | 'note' = 'chat', e?: React.MouseEvent) => {
-    e?.stopPropagation();
-    
-    if (isRecording) {
-      recognitionRef.current?.stop();
-      setIsRecording(false);
-      return;
-    }
-
-    // 1. Check for basic support
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      alert("Voice recognition is not supported in this browser. Please try Chrome, Edge, or Safari.");
-      return;
-    }
-
-    // 2. Preliminary Permission Check & Request
-    if (micPermissionStatus !== 'granted') {
-      try {
-        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-          throw new Error("Browser doesn't support media devices API");
-        }
-        
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        stream.getTracks().forEach(track => track.stop());
-        setMicPermissionStatus('granted');
-        setMicErrorMessage(null);
-      } catch (err: any) {
-        console.error("Microphone permission denied or error:", err);
-        const errName = err.name || '';
-        const errMsg = err.message || '';
-        
-        setMicPermissionStatus('denied');
-        setMicErrorMessage(errMsg || errName || 'Permission denied');
-        
-        if (errName === 'NotAllowedError' || errName === 'PermissionDeniedError' || errMsg.toLowerCase().includes('denied')) {
-          alert("Microphone access is blocked. \n\nIMPORTANT: \n1. Click the Lock icon 🔒 in the address bar.\n2. Set 'Microphone' to ALLOW.\n3. Refresh the page.\n\nIF YOU ARE IN AN IFRAME: Use the 'Open in New Tab' button in the toolbar to grant permission properly.");
-        } else {
-          alert(`Microphone error: ${errMsg || errName || 'Unknown error'}.\n\nPlease ensure a microphone is connected and try opening in a new tab.`);
-        }
-        return;
-      }
-    }
-
-    // 3. Initialize and start Speech Recognition
-    // We try to start it immediately to satisfy gesture requirements
-    const recognition = new SpeechRecognition();
-    recognition.continuous = true;
-    recognition.interimResults = false;
-    recognition.lang = 'en-US';
-
-    recognition.onstart = () => {
-      setIsRecording(true);
-      if (target === 'chat') {
-        setIsChatOpen(true);
-        setIsHeaderMenuOpen(false);
-      }
-    };
-
-    recognition.onresult = (event: any) => {
-      const current = event.resultIndex;
-      const transcript = event.results[current][0].transcript;
-      const isHtml = target === 'note';
-      const cleanTranscript = postProcessSpeechTranscript(transcript.trim(), isHtml);
-      
-      if (cleanTranscript.length === 0) return;
-      
-      if (target === 'chat') {
-        setChatInput(prev => {
-          if (prev.endsWith(cleanTranscript)) return prev;
-          const needsSpace = prev.length > 0 && 
-            !prev.endsWith('\n') && 
-            !prev.endsWith(' ') && 
-            !cleanTranscript.startsWith('\n') &&
-            !/^[.,!?:;]/.test(cleanTranscript);
-          const spacer = needsSpace ? ' ' : '';
-          const combined = prev + spacer + cleanTranscript;
-          return combined.slice(0, MAX_CHARS);
-        });
-      } else {
-        setEditContent(prev => {
-          if (prev.endsWith(cleanTranscript)) return prev;
-          const needsSpace = prev.length > 0 && 
-            !prev.endsWith('<br>') && 
-            !prev.endsWith(' ') && 
-            !cleanTranscript.startsWith('<br>') &&
-            !/^[.,!?:;]/.test(cleanTranscript);
-          const spacer = needsSpace ? ' ' : '';
-          const combined = prev + spacer + cleanTranscript;
-          return combined.slice(0, MAX_CHARS);
-        });
-        if (editorRef.current) {
-          const content = editorRef.current.innerHTML;
-          if (!content.endsWith(cleanTranscript)) {
-            const needsSpace = content.length > 0 && 
-              !content.endsWith('<br>') && 
-              !content.endsWith(' ') && 
-              !cleanTranscript.startsWith('<br>') &&
-              !/^[.,!?:;]/.test(cleanTranscript);
-            const spacer = needsSpace ? ' ' : '';
-            editorRef.current.innerHTML = content + spacer + cleanTranscript;
-            normalizeEditorUnderlines(editorRef.current);
-          }
-        }
-      }
-    };
-
-    recognition.onend = async () => {
-      setIsRecording(false);
-      // Asynchronous AI polish for complex spoken sentences
-      if (target === 'note' && editorRef.current && activeNoteId) {
-        const currentHtml = editorRef.current.innerHTML;
-        if (/\b(?:period|comma|question\s+mark|exclamation\s+(?:mark|point)|new\s+line|next\s+line|colon|semicolon|full\s+stop)\b/i.test(currentHtml)) {
-          const polished = await aiPostProcessSpeech(currentHtml, true);
-          if (polished && polished !== currentHtml && editorRef.current) {
-            editorRef.current.innerHTML = polished;
-            setEditContent(polished);
-            setNotes(prev => prev.map(n => n.id === activeNoteId ? { ...n, content: polished } : n));
-          }
-        }
-      }
-    };
-
-    recognition.onerror = (event: any) => {
-      console.error("Speech recognition error handle:", event.error);
-      setIsRecording(false);
-      
-      if (event.error === 'not-allowed') {
-        setMicPermissionStatus('denied');
-        alert("Voice recognition blocked. Please check site permissions in your browser settings.");
-      } else if (event.error === 'no-speech') {
-        // Silent end
-      } else {
-        alert(`Voice recognition error: ${event.error}.`);
-      }
-    };
-
-    recognitionRef.current = recognition;
-    
-    try {
-      recognition.start();
-    } catch (err) {
-      console.error("Error starting recognition:", err);
-      setIsRecording(false);
-    }
   };
 
   const toggleDrawing = (id: string, e?: React.MouseEvent) => {
@@ -2184,13 +2396,25 @@ export default function App() {
                       initial={{ opacity: 0, y: -10 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -10 }}
-                      className="mb-4 mx-auto px-3.5 py-2 bg-slate-900/95 backdrop-blur-md text-white text-xs rounded-2xl shadow-xl flex flex-wrap items-center justify-center gap-2 border border-white/10 z-30 max-w-full text-center"
+                      className="mb-4 mx-auto px-4 py-2 bg-slate-900/95 backdrop-blur-md text-white text-xs rounded-2xl shadow-xl flex flex-wrap items-center justify-center gap-2 border border-white/10 z-30 max-w-full text-center"
                     >
                       <div className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping shrink-0" />
                       <span className="font-bold tracking-wider uppercase text-[10px] text-red-400">Listening:</span>
-                      <span className="text-slate-300 text-xs">
-                        Say <span className="text-white font-semibold">"bold [words]"</span>, <span className="text-white font-semibold">"underline [words]"</span>, <span className="text-white font-semibold">"period"</span>, <span className="text-white font-semibold">"comma"</span>, <span className="text-white font-semibold">"question mark"</span>, <span className="text-white font-semibold">"new line"</span>
-                      </span>
+                      {liveInterimText ? (
+                        <span className="font-semibold text-indigo-200 text-xs sm:text-sm bg-indigo-500/20 border border-indigo-400/30 px-3 py-1 rounded-xl animate-pulse max-w-full truncate">
+                          "{liveInterimText}"
+                        </span>
+                      ) : (
+                        <span className="text-slate-300 text-xs">
+                          Real-time dictation active. Say <span className="text-white font-semibold">"bold [words]"</span>, <span className="text-white font-semibold">"underline [words]"</span>, <span className="text-white font-semibold">"period"</span>, <span className="text-white font-semibold">"new line"</span>
+                        </span>
+                      )}
+                      <button
+                        onClick={() => stopVoiceRecording()}
+                        className="ml-1 sm:ml-2 px-2.5 py-1 bg-white/10 hover:bg-white/20 text-white rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all min-h-[32px] flex items-center justify-center"
+                      >
+                        Stop
+                      </button>
                     </motion.div>
                   )}
                   
@@ -2395,15 +2619,24 @@ export default function App() {
                           <div className="bg-indigo-600 p-3.5 sm:p-5 rounded-full mb-3 sm:mb-4 animate-pulse shadow-[0_0_30px_rgba(79,70,229,0.3)]">
                             <Mic size={24} className="md:w-8 md:h-8 text-white" />
                           </div>
-                          <span className="tracking-[0.25em] uppercase text-[9px] md:text-[10px] font-black text-white/50 mb-1.5">Engine Listening...</span>
-                          <p className="text-[11px] sm:text-xs text-indigo-300 font-medium mb-4 text-center max-w-xs leading-relaxed">
-                            Speak formatting & punctuation: <span className="text-white font-semibold">"bold [words]"</span>, <span className="text-white font-semibold">"underline [words]"</span>, <span className="text-white font-semibold">"period"</span>, <span className="text-white font-semibold">"comma"</span>, <span className="text-white font-semibold">"new line"</span>
+                          <span className="tracking-[0.25em] uppercase text-[9px] md:text-[10px] font-black text-white/50 mb-1.5">Live Voice Dictation</span>
+                          {liveInterimText ? (
+                            <div className="w-full max-w-md my-2 px-3.5 py-2.5 bg-indigo-500/20 border border-indigo-400/40 rounded-xl text-indigo-100 text-xs sm:text-sm font-semibold text-center animate-pulse break-words">
+                              "{liveInterimText}"
+                            </div>
+                          ) : (
+                            <p className="text-[11px] sm:text-xs text-indigo-300 font-medium mb-3 text-center max-w-xs leading-relaxed">
+                              Speak naturally. Words appear instantly in real-time as you speak.
+                            </p>
+                          )}
+                          <p className="text-[10px] text-white/40 font-medium mb-4 text-center max-w-xs">
+                            Commands: "bold [words]", "underline [words]", "period", "comma", "new line"
                           </p>
                           <button 
-                            onClick={() => recognitionRef.current?.stop()}
+                            onClick={() => stopVoiceRecording()}
                             className="w-full min-h-[44px] px-6 py-3 bg-white text-slate-950 rounded-xl md:rounded-2xl text-[11px] font-black uppercase tracking-widest hover:bg-slate-100 transition-all shadow-lg active:scale-95 flex items-center justify-center"
                           >
-                            Stop Engine
+                            Stop Listening
                           </button>
                         </motion.div>
                       )}
@@ -2416,11 +2649,14 @@ export default function App() {
                         <input
                           type="text"
                           value={chatInput}
-                          onChange={(e) => setChatInput(e.target.value.slice(0, MAX_CHARS))}
+                          onChange={(e) => {
+                            const val = e.target.value.slice(0, MAX_CHARS);
+                            setChatInput(val);
+                            committedChatPrefixRef.current = val;
+                          }}
                           onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
-                          placeholder={isRecording ? "Listening..." : "Message Vocal..."}
-                          disabled={isRecording}
-                          className="flex-1 bg-white/5 border border-white/5 rounded-xl md:rounded-2xl px-3.5 sm:px-6 py-2.5 sm:py-4 text-sm md:text-[15px] text-white placeholder:text-white/20 focus:ring-2 focus:ring-indigo-500/50 outline-none disabled:opacity-50 transition-all font-medium min-h-[44px]"
+                          placeholder={isRecording ? (liveInterimText ? `Hearing: "${liveInterimText}"` : "Listening... speak now") : "Message Vocal..."}
+                          className="flex-1 bg-white/5 border border-white/5 rounded-xl md:rounded-2xl px-3.5 sm:px-6 py-2.5 sm:py-4 text-sm md:text-[15px] text-white placeholder:text-white/30 focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all font-medium min-h-[44px]"
                         />
                         <button
                           onClick={(e) => startVoiceRecording('chat', e)}
@@ -2439,7 +2675,7 @@ export default function App() {
                       </div>
                       <button
                         onClick={handleSendMessage}
-                        disabled={isLoading || !chatInput.trim() || isRecording}
+                        disabled={isLoading || !chatInput.trim()}
                         className="w-full min-h-[44px] py-2.5 sm:py-3.5 md:py-4 bg-white text-slate-950 rounded-xl md:rounded-2xl font-black uppercase tracking-widest text-[11px] md:text-[11px] disabled:opacity-10 disabled:cursor-not-allowed transform active:scale-[0.98] transition-all flex items-center justify-center gap-2 shadow-2xl hover:bg-slate-50"
                       >
                         <Send size={14} />
