@@ -437,6 +437,7 @@ export default function App() {
   const [isDrawing, setIsDrawing] = useState(false);
   const drawingId = isDrawing ? activeNoteId : null;
   const editingId = !isDrawing ? activeNoteId : null;
+  const isPointerDrawingRef = useRef(false);
 
   // Ref for hidden file input
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -607,6 +608,7 @@ export default function App() {
       }
       setOpenMenuId(null);
       setIsHeaderMenuOpen(false);
+      setIsEditorMenuOpen(false);
     };
     window.addEventListener('click', handleClickOutside);
     return () => window.removeEventListener('click', handleClickOutside);
@@ -1517,11 +1519,20 @@ export default function App() {
     return () => observer.disconnect();
   }, [activeNoteId, isDrawing]);
 
-   const handleMouseDown = (e: any) => {
+  const handlePointerDown = (e: any) => {
     if (!activeNoteId || drawTool === 'pan') return;
     
     // Only draw if we are not multi-touching
-    if (e.evt && e.evt.touches && e.evt.touches.length > 1) return;
+    if (e.evt && e.evt.touches && e.evt.touches.length > 1) {
+      isPointerDrawingRef.current = false;
+      return;
+    }
+
+    if (e.evt && e.evt.cancelable) {
+      e.evt.preventDefault();
+    }
+
+    isPointerDrawingRef.current = true;
 
     const stage = e.target.getStage();
     const pos = stage.getPointerPosition();
@@ -1542,23 +1553,41 @@ export default function App() {
     }
   };
 
-  const handleMouseMove = (e: any) => {
+  const handlePointerMove = (e: any) => {
     if (!activeNoteId || drawTool === 'pan') return;
+
+    if (e.evt && e.evt.touches && e.evt.touches.length > 1) {
+      handleTouchMove(e);
+      return;
+    }
     
-    // Check if we are drawing (left click)
-    if (e.evt.buttons === 1) {
-      const stage = e.target.getStage();
-      const pos = stage.getPointerPosition();
-      const note = notes.find(n => n.id === activeNoteId);
+    // Drawing is active if touch pointer is down OR mouse button 1 is down
+    const isDrawingActive = isPointerDrawingRef.current || (e.evt && e.evt.buttons === 1);
+    if (!isDrawingActive) return;
+
+    if (e.evt && e.evt.cancelable) {
+      e.evt.preventDefault();
+    }
+
+    const stage = e.target.getStage();
+    const pos = stage.getPointerPosition();
+    const note = notes.find(n => n.id === activeNoteId);
+    
+    if (pos && note?.drawingLines && note.drawingLines.length > 0) {
+      const transform = stage.getAbsoluteTransform().copy().invert();
+      const relativePos = transform.point(pos);
       
-      if (pos && note?.drawingLines) {
-        const transform = stage.getAbsoluteTransform().copy().invert();
-        const relativePos = transform.point(pos);
-        
-        const lastLine = { ...note.drawingLines[note.drawingLines.length - 1] };
-        lastLine.points = lastLine.points.concat([relativePos.x, relativePos.y]);
-        const newLines = note.drawingLines.slice(0, -1).concat([lastLine]);
-        updateDrawing(activeNoteId, newLines);
+      const lines = [...note.drawingLines];
+      const lastLine = { ...lines[lines.length - 1] };
+      const pts = lastLine.points;
+      const lastX = pts[pts.length - 2];
+      const lastY = pts[pts.length - 1];
+      
+      // Throttle negligible subpixel jitter
+      if (Math.hypot(relativePos.x - lastX, relativePos.y - lastY) > 1.2) {
+        lastLine.points = pts.concat([relativePos.x, relativePos.y]);
+        lines[lines.length - 1] = lastLine;
+        updateDrawing(activeNoteId, lines);
       }
     }
   };
@@ -1599,7 +1628,9 @@ export default function App() {
   let lastCenter: any = null;
 
   const handleTouchMove = (e: any) => {
-    e.evt.preventDefault();
+    if (e.evt && e.evt.cancelable) {
+      e.evt.preventDefault();
+    }
     const touch1 = e.evt.touches[0];
     const touch2 = e.evt.touches[1];
 
@@ -1646,13 +1677,10 @@ export default function App() {
     }
   };
 
-  const handleTouchEnd = () => {
+  const handlePointerUp = () => {
+    isPointerDrawingRef.current = false;
     lastDist = 0;
     lastCenter = null;
-  };
-
-  const handleMouseUp = () => {
-    // End of stroke
   };
 
   const updateDrawing = (id: string, lines: DrawingLine[]) => {
@@ -1663,6 +1691,31 @@ export default function App() {
     e?.stopPropagation();
     setNotes(prev => prev.map(n => n.id === id ? { ...n, drawingLines: [] } : n));
     setOpenMenuId(null);
+  };
+
+  const startNewVoiceNote = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    const notePatterns = PATTERNS.filter(p => p !== 'none');
+    const newId = crypto.randomUUID();
+    const newNote: Note = {
+      id: newId,
+      content: '',
+      completed: false,
+      color: COLORS[notes.length % COLORS.length],
+      pattern: notePatterns[notes.length % notePatterns.length],
+      rotation: Math.random() * 6 - 3,
+      x: 50 + (notes.length * 40) % 600,
+      y: 50 + (notes.length * 40) % 400,
+      fontSize: 48,
+      updatedAt: Date.now(),
+    };
+    setNotes([newNote, ...notes]);
+    setActiveNoteId(newId);
+    setIsDrawing(false);
+    setEditContent('');
+    setTimeout(() => {
+      startVoiceRecording('note');
+    }, 120);
   };
 
   const handleSendMessage = async () => {
@@ -2006,15 +2059,28 @@ export default function App() {
             </AnimatePresence>
           </div>
 
-          <button
-            onClick={() => addNote()}
-            className="group/btn px-2.5 sm:px-4 md:px-8 py-1.5 sm:py-2 md:py-3 bg-indigo-600 text-white rounded-xl md:rounded-[20px] text-[11px] sm:text-xs md:text-sm font-black flex items-center justify-center gap-1 sm:gap-2 transition-all hover:scale-105 hover:bg-indigo-700 active:scale-95 shadow-md shrink-0 min-h-[34px] sm:min-h-[40px] relative overflow-hidden"
-          >
-            <div className="absolute inset-0 bg-white/10 opacity-0 group-hover/btn:opacity-100 transition-opacity" />
-            <Plus size={16} className="md:w-[18px] md:h-[18px]" />
-            <span className="hidden md:inline">NEW NOTE</span>
-            <span className="md:hidden">ADD</span>
-          </button>
+          <div className="flex items-center gap-1.5 sm:gap-2">
+            {/* Quick Voice Note Button */}
+            <button
+              onClick={startNewVoiceNote}
+              className="px-2.5 sm:px-3.5 md:px-5 py-1.5 sm:py-2 md:py-3 bg-rose-500 hover:bg-rose-600 text-white rounded-xl md:rounded-[20px] text-[11px] sm:text-xs md:text-sm font-black flex items-center justify-center gap-1 sm:gap-1.5 transition-all hover:scale-105 active:scale-95 shadow-md shrink-0 min-h-[34px] sm:min-h-[40px]"
+              title="Record Voice Note"
+              aria-label="Record Voice Note"
+            >
+              <Mic size={16} className="md:w-[18px] md:h-[18px]" />
+              <span className="hidden sm:inline">VOICE</span>
+            </button>
+
+            <button
+              onClick={() => addNote()}
+              className="group/btn px-2.5 sm:px-4 md:px-8 py-1.5 sm:py-2 md:py-3 bg-indigo-600 text-white rounded-xl md:rounded-[20px] text-[11px] sm:text-xs md:text-sm font-black flex items-center justify-center gap-1 sm:gap-2 transition-all hover:scale-105 hover:bg-indigo-700 active:scale-95 shadow-md shrink-0 min-h-[34px] sm:min-h-[40px] relative overflow-hidden"
+            >
+              <div className="absolute inset-0 bg-white/10 opacity-0 group-hover/btn:opacity-100 transition-opacity" />
+              <Plus size={16} className="md:w-[18px] md:h-[18px]" />
+              <span className="hidden md:inline">NEW NOTE</span>
+              <span className="md:hidden">ADD</span>
+            </button>
+          </div>
         </div>
       </header>
 
@@ -2061,7 +2127,8 @@ export default function App() {
                     relative w-full h-[280px] xs:h-[295px] sm:h-[310px] md:h-[330px] max-h-[340px] p-4 sm:p-5 md:p-[22px] flex flex-col items-start
                     note-shadow hover:note-shadow-hover paper-texture
                     border border-black/5 rounded-2xl md:rounded-3xl
-                    transition-all duration-300 note-corner-fold group overflow-hidden
+                    transition-all duration-300 note-corner-fold group
+                    ${openMenuId === note.id ? '!overflow-visible !z-50 ring-2 ring-indigo-500/20' : 'overflow-hidden z-0'}
                     ${isBoardActive ? '!w-[280px] md:!w-[310px] cursor-grab active:cursor-grabbing' : 'w-full cursor-pointer'}
                     ${note.color}
                     ${note.pattern && note.pattern !== 'none' ? note.pattern : ''}
@@ -2148,6 +2215,83 @@ export default function App() {
                       <Palette size={16} />
                     </button>
                     <button
+                      onClick={(e) => toggleDrawing(note.id, e)}
+                      className="min-w-[36px] min-h-[36px] p-2 rounded-xl bg-white/20 hover:bg-purple-600 hover:text-white text-purple-700 transition-colors border border-black/10 flex items-center justify-center"
+                      title="Sketch Note"
+                    >
+                      <Pencil size={16} />
+                    </button>
+
+                    {/* Three-Dot Options Menu */}
+                    <div className="relative">
+                      <button
+                        onClick={(e) => toggleMenu(note.id, e)}
+                        className={`min-w-[36px] min-h-[36px] p-2 rounded-xl transition-colors border border-black/10 flex items-center justify-center ${openMenuId === note.id ? 'bg-black text-white shadow-md' : 'bg-white/20 hover:bg-white text-slate-700'}`}
+                        title="More Options"
+                        aria-label="More Options"
+                      >
+                        <MoreVertical size={16} />
+                      </button>
+
+                      <AnimatePresence>
+                        {openMenuId === note.id && (
+                          <motion.div
+                            initial={{ opacity: 0, scale: 0.95, y: -6 }}
+                            animate={{ opacity: 1, scale: 1, y: 0 }}
+                            exit={{ opacity: 0, scale: 0.95, y: -6 }}
+                            transition={{ duration: 0.15 }}
+                            onClick={(e) => e.stopPropagation()}
+                            className="absolute bottom-full right-0 mb-2 w-48 sm:w-52 bg-white/95 backdrop-blur-2xl rounded-2xl shadow-2xl border border-black/10 z-[200] p-1.5 flex flex-col gap-0.5 text-slate-700 text-xs font-semibold overflow-visible"
+                          >
+                            <button
+                              onClick={(e) => { e.stopPropagation(); startEditing(note); setOpenMenuId(null); }}
+                              className="flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-black/5 text-slate-800 transition-colors w-full text-left min-h-[40px]"
+                            >
+                              <Edit3 size={15} className="text-slate-500" />
+                              <span>Edit Note</span>
+                            </button>
+                            <button
+                              onClick={(e) => toggleDrawing(note.id, e)}
+                              className="flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-black/5 text-purple-600 transition-colors w-full text-left min-h-[40px]"
+                            >
+                              <Pencil size={15} />
+                              <span>Sketch / Draw</span>
+                            </button>
+                            <button
+                              onClick={(e) => triggerGallery(note.id, e)}
+                              className="flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-black/5 text-blue-600 transition-colors w-full text-left min-h-[40px]"
+                            >
+                              <ImageIcon size={15} />
+                              <span>Attach Photo</span>
+                            </button>
+                            <button
+                              onClick={(e) => changeColor(note.id, e)}
+                              className="flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-black/5 text-amber-600 transition-colors w-full text-left min-h-[40px]"
+                            >
+                              <Palette size={15} />
+                              <span>Cycle Color</span>
+                            </button>
+                            <button
+                              onClick={(e) => toggleComplete(note.id, e)}
+                              className="flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-black/5 text-emerald-600 transition-colors w-full text-left min-h-[40px]"
+                            >
+                              <Check size={15} />
+                              <span>{note.completed ? 'Mark Incomplete' : 'Mark Completed'}</span>
+                            </button>
+                            <div className="h-px bg-black/5 my-0.5" />
+                            <button
+                              onClick={(e) => deleteNote(note.id, e)}
+                              className="flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-red-50 text-red-600 transition-colors w-full text-left min-h-[40px]"
+                            >
+                              <Trash2 size={15} />
+                              <span>Delete Note</span>
+                            </button>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+
+                    <button
                       onClick={(e) => deleteNote(note.id, e)}
                       className="min-w-[36px] min-h-[36px] p-2 rounded-xl bg-white/20 hover:bg-red-500 hover:text-white text-red-500 transition-colors border border-black/10 flex items-center justify-center"
                       title="Delete"
@@ -2172,11 +2316,11 @@ export default function App() {
             className="fixed inset-0 z-[200] bg-white flex flex-col"
           >
             {/* Editor Header */}
-            <header className="px-3 sm:px-6 md:px-8 py-2.5 sm:py-4 md:py-6 flex items-center justify-between border-b border-black/5 bg-white/70 backdrop-blur-xl shrink-0 min-h-[58px] sm:min-h-[66px]">
-              <div className="flex items-center gap-1.5 sm:gap-3 md:gap-4">
+            <header className="px-3 sm:px-6 md:px-8 py-2.5 sm:py-4 md:py-6 flex items-center justify-between border-b border-black/5 bg-white/70 backdrop-blur-xl shrink-0 min-h-[58px] sm:min-h-[66px] relative z-[100] overflow-visible">
+              <div className="flex items-center gap-1.5 sm:gap-3 md:gap-4 shrink-0">
                 <button 
                   onClick={saveNote}
-                  className="min-w-[38px] min-h-[38px] sm:min-w-[42px] sm:min-h-[42px] p-2 hover:bg-black/5 rounded-full transition-colors text-slate-600 flex items-center justify-center"
+                  className="min-w-[38px] min-h-[38px] sm:min-w-[42px] sm:min-h-[42px] p-2 hover:bg-black/5 rounded-full transition-colors text-slate-600 flex items-center justify-center active:scale-95"
                   title="Back"
                 >
                   <ArrowLeft size={20} className="md:w-6 md:h-6" />
@@ -2188,154 +2332,161 @@ export default function App() {
               </div>
 
               <div className="flex items-center gap-1 sm:gap-1.5 md:gap-2">
-                {/* Single Pencil Mode Switcher */}
+                {/* Single Pencil / Sketch Mode Switcher */}
                 <button
                   onClick={() => setIsDrawing(!isDrawing)}
-                  className={`min-w-[38px] min-h-[38px] sm:min-w-[42px] sm:min-h-[42px] p-2 md:p-3 rounded-xl md:rounded-2xl transition-all flex items-center justify-center ${isDrawing ? 'bg-purple-600 text-white shadow-md' : 'bg-transparent text-slate-500 hover:text-black hover:bg-black/5'}`}
-                  title={isDrawing ? "Writing Mode" : "Drawing Mode"}
+                  className={`min-w-[38px] min-h-[38px] sm:min-w-[42px] sm:min-h-[42px] p-2 md:p-3 rounded-xl md:rounded-2xl transition-all flex items-center justify-center active:scale-95 ${isDrawing ? 'bg-purple-600 text-white shadow-md' : 'bg-black/5 hover:bg-black/10 text-slate-700'}`}
+                  title={isDrawing ? "Switch to Writing Mode" : "Switch to Sketch Mode"}
+                  aria-label={isDrawing ? "Writing Mode" : "Sketch Mode"}
                 >
                   <Pencil size={18} className="md:w-[22px] md:h-[22px]" />
                 </button>
 
-                <AnimatePresence>
-                  {isDrawing && (
-                    <motion.div
-                      initial={{ opacity: 0, scale: 0.95 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      exit={{ opacity: 0, scale: 0.95 }}
-                      className="fixed md:relative bottom-20 md:bottom-auto left-2 right-2 sm:left-4 sm:right-4 md:left-auto md:right-auto flex flex-wrap items-center justify-center gap-1 bg-white/95 md:bg-slate-50 backdrop-blur-md md:backdrop-blur-none p-1.5 sm:p-2 rounded-2xl border border-black/10 md:border-black/5 shadow-2xl md:shadow-none z-50 md:z-auto max-w-[calc(100vw-16px)] mx-auto"
-                    >
-                      <button
-                        onClick={() => setDrawTool('pen')}
-                        className={`min-w-[38px] min-h-[38px] p-2 rounded-xl transition-all flex items-center justify-center ${drawTool === 'pen' ? 'bg-black text-white' : 'hover:bg-black/5 text-slate-500'}`}
-                        title="Pen"
-                      >
-                        <Pencil size={18} />
-                      </button>
-                      <button
-                        onClick={() => setDrawTool('eraser')}
-                        className={`min-w-[38px] min-h-[38px] p-2 rounded-xl transition-all flex items-center justify-center ${drawTool === 'eraser' ? 'bg-black text-white' : 'hover:bg-black/5 text-slate-500'}`}
-                        title="Eraser"
-                      >
-                        <Eraser size={18} />
-                      </button>
-                      <button
-                        onClick={() => setDrawTool('pan')}
-                        className={`min-w-[38px] min-h-[38px] p-2 rounded-xl transition-all flex items-center justify-center ${drawTool === 'pan' ? 'bg-black text-white' : 'hover:bg-black/5 text-slate-500'}`}
-                        title="Pan Tool"
-                      >
-                        <Hand size={18} />
-                      </button>
-                      <button
-                        onClick={() => { setStageScale(1); setStagePos({ x: 0, y: 0 }); }}
-                        className="hidden md:flex min-w-[38px] min-h-[38px] p-2 rounded-xl hover:bg-black/5 text-slate-400 transition-all items-center justify-center"
-                        title="Reset View"
-                      >
-                        <Maximize size={18} />
-                      </button>
-                      <div className="w-px h-6 bg-black/10 mx-1" />
-                      <div className="flex items-center gap-1 md:gap-1.5 px-0.5 max-w-[130px] overflow-x-auto">
-                        {['#000000', '#ef4444', '#3b82f6', '#10b981', '#f59e0b'].map(c => (
-                          <button
-                            key={c}
-                            onClick={() => { setDrawColor(c); setDrawTool('pen'); }}
-                            className={`w-6 h-6 shrink-0 rounded-full border border-black/10 transition-all hover:scale-110 ${drawColor === c && drawTool === 'pen' ? 'ring-2 ring-black ring-offset-2' : ''}`}
-                            style={{ backgroundColor: c }}
-                          />
-                        ))}
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
+                {/* Voice Dictation Button - Explicitly visible and interactive on both mobile and desktop */}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (isRecording || shouldKeepRecordingRef.current) {
+                      stopVoiceRecording();
+                    } else {
+                      startVoiceRecording('note', e);
+                    }
+                  }}
+                  className={`min-w-[38px] min-h-[38px] sm:min-w-[42px] sm:min-h-[42px] p-2 md:p-3 rounded-xl md:rounded-2xl transition-all flex items-center justify-center active:scale-95 ${
+                    isRecording 
+                      ? 'bg-red-500 text-white shadow-lg animate-pulse ring-2 ring-red-400' 
+                      : micPermissionStatus === 'denied'
+                        ? 'bg-red-50 text-red-400 border border-red-200'
+                        : 'bg-black/5 hover:bg-black/10 text-slate-700 hover:text-red-500'
+                  }`}
+                  title={isRecording ? "Stop Voice Dictation" : (micPermissionStatus === 'denied' ? "Mic Blocked" : "Voice to Note")}
+                  aria-label="Voice Dictation"
+                >
+                  {micPermissionStatus === 'denied' ? <MicOff size={18} className="md:w-[22px] md:h-[22px]" /> : <Mic size={18} className="md:w-[22px] md:h-[22px]" />}
+                </button>
 
-                <div className="hidden md:block w-px h-8 bg-black/5 mx-1" />
+                {/* Gallery Button - Direct on md screens */}
+                <button
+                  onClick={(e) => triggerGallery(activeNoteId, e)}
+                  className="hidden md:flex min-w-[42px] min-h-[42px] p-3 rounded-2xl hover:bg-slate-50 text-slate-400 hover:text-blue-500 transition-all items-center justify-center"
+                  title="Attach Photo"
+                >
+                  <ImageIcon size={22} />
+                </button>
 
-                {/* Direct Action Tools */}
-                <div className="hidden md:flex items-center gap-1">
-                  <button
-                    onClick={(e) => triggerGallery(activeNoteId, e)}
-                    className="p-3 rounded-2xl hover:bg-slate-50 text-slate-400 hover:text-blue-500 transition-all"
-                    title="Gallery"
-                  >
-                    <ImageIcon size={22} />
-                  </button>
-
-                  <button
-                    onClick={(e) => startVoiceRecording('note', e)}
-                    className={`p-3 rounded-2xl transition-all ${
-                      isRecording 
-                        ? 'bg-red-500 text-white animate-pulse' 
-                        : micPermissionStatus === 'denied'
-                          ? 'hover:bg-red-50 text-red-300'
-                          : 'hover:bg-slate-50 text-slate-400 hover:text-red-500'
-                    }`}
-                    title={micPermissionStatus === 'denied' ? "Mic Blocked" : "Voice to Note"}
-                  >
-                    {micPermissionStatus === 'denied' ? <MicOff size={22} /> : <Mic size={22} />}
-                  </button>
-                </div>
-
+                {/* AI Chat Button */}
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
                     setIsChatOpen(!isChatOpen);
                   }}
-                  className={`min-w-[38px] min-h-[38px] sm:min-w-[42px] sm:min-h-[42px] p-2 md:p-3 rounded-xl md:rounded-2xl transition-all flex items-center justify-center ${isChatOpen ? 'bg-blue-600 text-white shadow-md' : 'hover:bg-blue-50 text-slate-400 hover:text-blue-600'}`}
+                  className={`min-w-[38px] min-h-[38px] sm:min-w-[42px] sm:min-h-[42px] p-2 md:p-3 rounded-xl md:rounded-2xl transition-all flex items-center justify-center active:scale-95 ${isChatOpen ? 'bg-blue-600 text-white shadow-md' : 'bg-black/5 hover:bg-blue-50 text-slate-600 hover:text-blue-600'}`}
                   title="AI Sidebar Chat"
+                  aria-label="AI Chat"
                 >
                   <MessageCircle size={18} className="md:w-[22px] md:h-[22px]" />
                 </button>
 
-                {/* Overflow Menu for smaller screens */}
-                <div className="md:hidden relative">
-                   <button
-                    onClick={() => setIsEditorMenuOpen(!isEditorMenuOpen)}
-                    className="min-w-[38px] min-h-[38px] p-2 rounded-xl bg-black/5 hover:bg-black/10 transition-all flex items-center justify-center"
+                {/* Three-Dot Overflow Menu for Mobile & Options */}
+                <div className="relative overflow-visible z-[350]">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsEditorMenuOpen(!isEditorMenuOpen);
+                    }}
+                    className={`min-w-[38px] min-h-[38px] sm:min-w-[42px] sm:min-h-[42px] p-2 md:p-3 rounded-xl md:rounded-2xl transition-all flex items-center justify-center active:scale-95 ${isEditorMenuOpen ? 'bg-black text-white' : 'bg-black/5 hover:bg-black/10 text-slate-700'}`}
                     aria-label="More options"
+                    title="More options"
                   >
-                    <MoreVertical size={18} />
+                    <MoreVertical size={18} className="md:w-[20px] md:h-[20px]" />
                   </button>
+
                   <AnimatePresence>
                     {isEditorMenuOpen && (
                       <motion.div
-                        initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                        initial={{ opacity: 0, y: 8, scale: 0.95 }}
                         animate={{ opacity: 1, y: 0, scale: 1 }}
-                        exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                        className="absolute top-full right-0 mt-2 w-52 bg-white border border-black/10 rounded-2xl shadow-2xl z-[300] p-1.5 overflow-hidden flex flex-col gap-1"
+                        exit={{ opacity: 0, y: 8, scale: 0.95 }}
+                        transition={{ duration: 0.15 }}
+                        onClick={(e) => e.stopPropagation()}
+                        className="absolute top-full right-0 mt-2 w-56 bg-white/95 backdrop-blur-2xl border border-black/10 rounded-2xl shadow-2xl z-[400] p-1.5 flex flex-col gap-1 max-w-[calc(100vw-24px)] overflow-visible"
                       >
-                         <button
+                        <button
                           onClick={(e) => { triggerGallery(activeNoteId, e); setIsEditorMenuOpen(false); }}
                           className="flex items-center gap-3 p-3 rounded-xl hover:bg-black/5 text-slate-700 font-bold text-xs min-h-[44px]"
                         >
-                          <ImageIcon size={18} />
-                          <span>Gallery</span>
+                          <ImageIcon size={18} className="text-blue-500" />
+                          <span>Attach Photo</span>
                         </button>
                         <button
-                          onClick={(e) => { startVoiceRecording('note', e); setIsEditorMenuOpen(false); }}
-                          className="flex items-center gap-3 p-3 rounded-xl hover:bg-black/5 text-slate-700 font-bold text-xs min-h-[44px]"
-                        >
-                          <Mic size={18} />
-                          <span>Voice Input</span>
-                        </button>
-                         <button
                           onClick={(e) => { changeColor(activeNoteId!, e); setIsEditorMenuOpen(false); }}
                           className="flex items-center gap-3 p-3 rounded-xl hover:bg-black/5 text-slate-700 font-bold text-xs min-h-[44px]"
                         >
-                          <Palette size={18} />
-                          <span>Theme Note</span>
+                          <Palette size={18} className="text-purple-500" />
+                          <span>Cycle Color Theme</span>
                         </button>
+
+                        {/* Mobile Text Formatting Controls */}
+                        <div className="md:hidden flex items-center justify-between px-3 py-2 bg-black/5 rounded-xl text-xs font-bold text-slate-700">
+                          <span className="flex items-center gap-2">
+                            <Type size={16} /> Font Size
+                          </span>
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => setEditFontSize(prev => Math.max(12, prev - 4))}
+                              className="w-7 h-7 bg-white rounded-lg shadow-sm flex items-center justify-center font-bold text-slate-800 active:scale-95"
+                            >
+                              -
+                            </button>
+                            <span className="w-6 text-center text-[11px]">{editFontSize}</span>
+                            <button
+                              onClick={() => setEditFontSize(prev => Math.min(120, prev + 4))}
+                              className="w-7 h-7 bg-white rounded-lg shadow-sm flex items-center justify-center font-bold text-slate-800 active:scale-95"
+                            >
+                              +
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="md:hidden flex items-center gap-2 px-1 py-1">
+                          <button
+                            onClick={() => applyFormat('bold')}
+                            className={`flex-1 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${isBold ? 'bg-black text-white shadow-sm' : 'bg-black/5 text-slate-700'}`}
+                          >
+                            <Bold size={15} /> Bold
+                          </button>
+                          <button
+                            onClick={() => applyFormat('underline')}
+                            className={`flex-1 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${isUnderline ? 'bg-black text-white shadow-sm' : 'bg-black/5 text-slate-700'}`}
+                          >
+                            <Underline size={15} /> Underline
+                          </button>
+                        </div>
+
+                        {isDrawing && (
+                          <button
+                            onClick={(e) => { clearDrawing(activeNoteId!, e); setIsEditorMenuOpen(false); }}
+                            className="flex items-center gap-3 p-3 rounded-xl hover:bg-orange-50 text-orange-600 font-bold text-xs min-h-[44px]"
+                          >
+                            <Eraser size={18} />
+                            <span>Clear Sketch Canvas</span>
+                          </button>
+                        )}
+
+                        <div className="h-px bg-black/5 my-0.5" />
                         <button
                           onClick={(e) => { deleteNote(activeNoteId!, e); setIsEditorMenuOpen(false); }}
                           className="flex items-center gap-3 p-3 rounded-xl hover:bg-red-50 text-red-500 font-bold text-xs min-h-[44px]"
                         >
                           <Trash2 size={18} />
-                          <span>Delete</span>
+                          <span>Delete Note</span>
                         </button>
                       </motion.div>
                     )}
                   </AnimatePresence>
                 </div>
 
+                {/* Desktop Formatting Controls */}
                 <div className="hidden lg:flex items-center gap-1 bg-black/5 p-1 rounded-[22px] ml-1">
                   <button
                     onClick={() => setEditFontSize(prev => Math.max(12, prev - 4))}
@@ -2376,7 +2527,7 @@ export default function App() {
 
                 <button
                   onClick={saveNote}
-                  className="min-w-[38px] min-h-[38px] sm:min-w-[42px] sm:min-h-[42px] p-2 md:p-3 bg-black text-white rounded-xl md:rounded-2xl hover:bg-slate-800 transition-all shadow-md ml-1 md:ml-2 flex items-center justify-center"
+                  className="min-w-[38px] min-h-[38px] sm:min-w-[42px] sm:min-h-[42px] p-2 md:p-3 bg-black text-white rounded-xl md:rounded-2xl hover:bg-slate-800 transition-all shadow-md ml-1 md:ml-2 flex items-center justify-center active:scale-95"
                   title="Save & Close"
                 >
                   <CheckCircle2 size={18} className="md:w-[22px] md:h-[22px]" />
@@ -2504,7 +2655,8 @@ export default function App() {
                   {/* Drawing Layer Overlay */}
                   <div 
                     ref={canvasContainerRef} 
-                    className={`absolute inset-0 z-20 ${isDrawing ? 'pointer-events-auto cursor-crosshair' : 'pointer-events-none'}`}
+                    className={`absolute inset-0 z-20 touch-none ${isDrawing ? 'pointer-events-auto cursor-crosshair' : 'pointer-events-none'}`}
+                    style={{ touchAction: 'none' }}
                   >
                     <Stage
                       width={canvasSize.width}
@@ -2517,21 +2669,12 @@ export default function App() {
                       onDragEnd={(e) => {
                         setStagePos({ x: e.target.x(), y: e.target.y() });
                       }}
-                      onMouseDown={handleMouseDown}
-                      onMouseMove={handleMouseMove}
-                      onMouseUp={handleMouseUp}
-                      onTouchStart={handleMouseDown}
-                      onTouchMove={(e) => {
-                        if (e.evt.touches.length > 1) {
-                          handleTouchMove(e);
-                        } else {
-                          handleMouseMove(e);
-                        }
-                      }}
-                      onTouchEnd={() => {
-                        handleTouchEnd();
-                        handleMouseUp();
-                      }}
+                      onMouseDown={handlePointerDown}
+                      onMouseMove={handlePointerMove}
+                      onMouseUp={handlePointerUp}
+                      onTouchStart={handlePointerDown}
+                      onTouchMove={handlePointerMove}
+                      onTouchEnd={handlePointerUp}
                       onWheel={handleWheel}
                     >
                       <Layer>
@@ -2554,6 +2697,81 @@ export default function App() {
                   </div>
                 </div>
               </div>
+
+              {/* Sketch Mode Floating Toolbar Dock - Fully interactive and visible on mobile and desktop */}
+              <AnimatePresence>
+                {isDrawing && activeNoteId && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 30, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 30, scale: 0.95 }}
+                    className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[250] flex flex-wrap items-center justify-center gap-1 sm:gap-1.5 bg-white/95 backdrop-blur-2xl p-2 sm:p-2.5 rounded-2xl sm:rounded-3xl border border-black/10 shadow-2xl max-w-[calc(100vw-20px)]"
+                  >
+                    <button
+                      onClick={() => setDrawTool('pen')}
+                      className={`min-w-[40px] min-h-[40px] sm:min-w-[42px] sm:min-h-[42px] p-2 rounded-xl transition-all flex items-center justify-center active:scale-95 ${drawTool === 'pen' ? 'bg-black text-white shadow-md' : 'hover:bg-black/5 text-slate-700'}`}
+                      title="Pen Tool"
+                      aria-label="Pen Tool"
+                    >
+                      <Pencil size={18} />
+                    </button>
+                    <button
+                      onClick={() => setDrawTool('eraser')}
+                      className={`min-w-[40px] min-h-[40px] sm:min-w-[42px] sm:min-h-[42px] p-2 rounded-xl transition-all flex items-center justify-center active:scale-95 ${drawTool === 'eraser' ? 'bg-black text-white shadow-md' : 'hover:bg-black/5 text-slate-700'}`}
+                      title="Eraser Tool"
+                      aria-label="Eraser Tool"
+                    >
+                      <Eraser size={18} />
+                    </button>
+                    <button
+                      onClick={() => setDrawTool('pan')}
+                      className={`min-w-[40px] min-h-[40px] sm:min-w-[42px] sm:min-h-[42px] p-2 rounded-xl transition-all flex items-center justify-center active:scale-95 ${drawTool === 'pan' ? 'bg-black text-white shadow-md' : 'hover:bg-black/5 text-slate-700'}`}
+                      title="Pan / Move View"
+                      aria-label="Pan Tool"
+                    >
+                      <Hand size={18} />
+                    </button>
+
+                    <div className="w-px h-6 bg-black/10 mx-0.5 sm:mx-1" />
+
+                    {/* Color Swatches */}
+                    <div className="flex items-center gap-1.5 px-1 overflow-x-auto">
+                      {['#000000', '#ef4444', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6'].map(c => (
+                        <button
+                          key={c}
+                          onClick={() => { setDrawColor(c); setDrawTool('pen'); }}
+                          className={`w-7 h-7 shrink-0 rounded-full border border-black/10 transition-all hover:scale-110 active:scale-95 ${drawColor === c && drawTool === 'pen' ? 'ring-2 ring-black ring-offset-2 scale-105' : ''}`}
+                          style={{ backgroundColor: c }}
+                          aria-label={`Color ${c}`}
+                        />
+                      ))}
+                    </div>
+
+                    <div className="w-px h-6 bg-black/10 mx-0.5 sm:mx-1" />
+
+                    {/* Clear Canvas */}
+                    <button
+                      onClick={(e) => clearDrawing(activeNoteId, e)}
+                      className="min-w-[38px] min-h-[38px] px-2.5 py-1.5 rounded-xl hover:bg-orange-50 text-slate-600 hover:text-orange-600 transition-all flex items-center justify-center gap-1 text-[11px] font-bold active:scale-95"
+                      title="Clear Canvas"
+                      aria-label="Clear Canvas"
+                    >
+                      <Trash2 size={15} />
+                      <span className="hidden sm:inline">Clear</span>
+                    </button>
+
+                    {/* Reset Zoom */}
+                    <button
+                      onClick={() => { setStageScale(1); setStagePos({ x: 0, y: 0 }); }}
+                      className="min-w-[38px] min-h-[38px] p-2 rounded-xl hover:bg-black/5 text-slate-500 transition-all flex items-center justify-center active:scale-95"
+                      title="Reset Zoom"
+                      aria-label="Reset Zoom"
+                    >
+                      <Maximize size={16} />
+                    </button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
 
               {/* Sidebar Chat Box */}
               <AnimatePresence>
@@ -2659,7 +2877,14 @@ export default function App() {
                           className="flex-1 bg-white/5 border border-white/5 rounded-xl md:rounded-2xl px-3.5 sm:px-6 py-2.5 sm:py-4 text-sm md:text-[15px] text-white placeholder:text-white/30 focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all font-medium min-h-[44px]"
                         />
                         <button
-                          onClick={(e) => startVoiceRecording('chat', e)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (isRecording || shouldKeepRecordingRef.current) {
+                              stopVoiceRecording();
+                            } else {
+                              startVoiceRecording('chat', e);
+                            }
+                          }}
                           disabled={isLoading}
                           className={`min-w-[44px] min-h-[44px] p-2.5 md:p-4 rounded-xl md:rounded-2xl transition-all transform active:scale-95 flex items-center justify-center ${
                             isRecording 

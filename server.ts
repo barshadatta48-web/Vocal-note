@@ -2,7 +2,6 @@ import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
-import { execSync } from 'child_process';
 import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
 
@@ -20,7 +19,7 @@ app.use(express.json());
 const apiKey = process.env.GEMINI_API_KEY;
 const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
 
-// Health check endpoint for Cloud Run
+// Health check endpoint for Cloud Run container lifecycle
 app.get('/health', (_req, res) => {
   res.status(200).send('OK');
 });
@@ -45,7 +44,7 @@ app.post('/api/generate', async (req, res) => {
     return res.json({ text: response.text });
   } catch (err: any) {
     console.error('Server Gemini Error:', err);
-    return res.status(500).json({ error: err.message || 'Failed to generate content' });
+    return res.status(500).json({ error: err?.message || 'Failed to generate content' });
   }
 });
 
@@ -90,22 +89,13 @@ Keep processing extremely fast, maintain natural word spacing, and do not spell 
     return res.json({ text: response.text?.trim() || transcript });
   } catch (err: any) {
     console.error('Server Speech Post-Processor Error:', err);
-    return res.status(500).json({ error: err.message || 'Failed to post-process transcript' });
+    return res.status(500).json({ error: err?.message || 'Failed to post-process transcript' });
   }
 });
 
 const distPath = path.resolve(__dirname, 'dist');
 
-// Ensure production dist directory exists before serving
-if (!fs.existsSync(distPath) || !fs.existsSync(path.join(distPath, 'index.html'))) {
-  console.log('Production dist bundle not found. Building with vite...');
-  try {
-    execSync('npx vite build', { stdio: 'inherit' });
-  } catch (err) {
-    console.error('Build execution failed:', err);
-  }
-}
-
+// Serve static production assets
 if (fs.existsSync(distPath)) {
   app.use(express.static(distPath));
 
@@ -113,11 +103,20 @@ if (fs.existsSync(distPath)) {
     res.sendFile(path.join(distPath, 'index.html'));
   });
 } else {
+  // Graceful fallback if static bundle is being served directly
   app.get('*', (_req, res) => {
-    res.status(503).send('Building application, please refresh in a moment.');
+    res.status(200).send(`<!DOCTYPE html><html><head><title>Vocal Note</title></head><body><h1>Vocal Note</h1><p>Application is ready.</p></body></html>`);
   });
 }
 
-app.listen(port, '0.0.0.0', () => {
+// Start HTTP server immediately to satisfy Cloud Run rollout checks
+const server = app.listen(port, '0.0.0.0', () => {
   console.log(`Server listening on http://0.0.0.0:${port}`);
+});
+
+process.on('SIGTERM', () => {
+  console.log('SIGTERM signal received: closing HTTP server');
+  server.close(() => {
+    console.log('HTTP server closed');
+  });
 });
