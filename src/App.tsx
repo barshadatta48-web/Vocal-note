@@ -769,14 +769,17 @@ export default function App() {
     setLiveInterimText('');
     liveInterimRef.current = '';
 
-    // Remove any live interim span inside note editor
-    if (editorRef.current) {
+    // Remove any live interim span inside note editor and auto-save cleanly
+    if (editorRef.current && activeNoteId) {
       const interimEl = editorRef.current.querySelector('#voice-interim-text');
       if (interimEl) {
         interimEl.remove();
         normalizeEditorUnderlines(editorRef.current);
-        setEditContent(editorRef.current.innerHTML);
       }
+      const finalHtml = editorRef.current.innerHTML;
+      setEditContent(finalHtml);
+      committedNoteHtmlRef.current = finalHtml;
+      setNotes(prev => prev.map(n => n.id === activeNoteId ? { ...n, content: finalHtml, updatedAt: Date.now() } : n));
     }
   };
 
@@ -880,8 +883,12 @@ export default function App() {
             const spacer = needsSpace ? ' ' : '';
             editorRef.current.innerHTML = content + spacer + formattedHtml;
             normalizeEditorUnderlines(editorRef.current);
-            setEditContent(editorRef.current.innerHTML);
-            committedNoteHtmlRef.current = editorRef.current.innerHTML;
+            const nextHtml = editorRef.current.innerHTML;
+            setEditContent(nextHtml);
+            committedNoteHtmlRef.current = nextHtml;
+            if (activeNoteId) {
+              setNotes(prev => prev.map(n => n.id === activeNoteId ? { ...n, content: nextHtml, updatedAt: Date.now() } : n));
+            }
             editorRef.current.scrollTop = editorRef.current.scrollHeight;
           } else {
             setEditContent(prev => {
@@ -891,9 +898,12 @@ export default function App() {
                 !cleanFinal.startsWith('<br>') && 
                 !/^[.,!?:;]/.test(cleanFinal);
               const spacer = needsSpace ? ' ' : '';
-              const next = prev + spacer + formattedHtml;
+              const next = (prev + spacer + formattedHtml).slice(0, MAX_CHARS);
               committedNoteHtmlRef.current = next;
-              return next.slice(0, MAX_CHARS);
+              if (activeNoteId) {
+                setNotes(notesPrev => notesPrev.map(n => n.id === activeNoteId ? { ...n, content: next, updatedAt: Date.now() } : n));
+              }
+              return next;
             });
           }
           setLiveInterimText('');
@@ -976,6 +986,13 @@ export default function App() {
       if (editorRef.current) {
         const interimEl = editorRef.current.querySelector('#voice-interim-text');
         if (interimEl) interimEl.remove();
+        normalizeEditorUnderlines(editorRef.current);
+        const finalContent = editorRef.current.innerHTML;
+        setEditContent(finalContent);
+        committedNoteHtmlRef.current = finalContent;
+        if (activeNoteId) {
+          setNotes(prev => prev.map(n => n.id === activeNoteId ? { ...n, content: finalContent, updatedAt: Date.now() } : n));
+        }
       }
 
       // AI polish if note dictation had punctuation commands
@@ -1011,8 +1028,13 @@ export default function App() {
     }
   };
 
-  const startVoiceRecording = async (target: 'chat' | 'note' = 'chat', e?: React.MouseEvent) => {
+  const startVoiceRecording = async (target: 'chat' | 'note' = 'note', e?: React.MouseEvent) => {
     e?.stopPropagation();
+
+    // Voice dictation is strictly scoped to an open note editor
+    if (!activeNoteId) {
+      return;
+    }
 
     // Toggle OFF if already recording
     if (isRecording || shouldKeepRecordingRef.current) {
@@ -1034,26 +1056,22 @@ export default function App() {
       }
     }
 
-    // Set baseline strings
-    if (target === 'chat') {
-      committedChatPrefixRef.current = chatInput;
+    // Set baseline strings for note
+    if (editorRef.current) {
+      const interimEl = editorRef.current.querySelector('#voice-interim-text');
+      if (interimEl) interimEl.remove();
+      committedNoteHtmlRef.current = editorRef.current.innerHTML;
     } else {
-      if (editorRef.current) {
-        const interimEl = editorRef.current.querySelector('#voice-interim-text');
-        if (interimEl) interimEl.remove();
-        committedNoteHtmlRef.current = editorRef.current.innerHTML;
-      } else {
-        committedNoteHtmlRef.current = editContent;
-      }
+      committedNoteHtmlRef.current = editContent;
     }
 
     shouldKeepRecordingRef.current = true;
-    currentTargetRef.current = target;
+    currentTargetRef.current = 'note';
     setLiveInterimText('');
     liveInterimRef.current = '';
 
     // Directly trigger inside user gesture (vital for mobile browsers & Safari)
-    startRecognitionSession(target);
+    startRecognitionSession('note');
   };
 
   const deleteNote = (id: string, e?: React.MouseEvent) => {
@@ -1693,30 +1711,7 @@ export default function App() {
     setOpenMenuId(null);
   };
 
-  const startNewVoiceNote = (e?: React.MouseEvent) => {
-    e?.stopPropagation();
-    const notePatterns = PATTERNS.filter(p => p !== 'none');
-    const newId = crypto.randomUUID();
-    const newNote: Note = {
-      id: newId,
-      content: '',
-      completed: false,
-      color: COLORS[notes.length % COLORS.length],
-      pattern: notePatterns[notes.length % notePatterns.length],
-      rotation: Math.random() * 6 - 3,
-      x: 50 + (notes.length * 40) % 600,
-      y: 50 + (notes.length * 40) % 400,
-      fontSize: 48,
-      updatedAt: Date.now(),
-    };
-    setNotes([newNote, ...notes]);
-    setActiveNoteId(newId);
-    setIsDrawing(false);
-    setEditContent('');
-    setTimeout(() => {
-      startVoiceRecording('note');
-    }, 120);
-  };
+
 
   const handleSendMessage = async () => {
     if (!chatInput.trim() || isLoading) return;
@@ -1819,8 +1814,8 @@ export default function App() {
               {/* Folded Corner Mimic */}
               <div className="absolute top-0 right-0 w-2.5 h-2.5 sm:w-3.5 sm:h-3.5 md:w-5 md:h-5 bg-gradient-to-br from-orange-100 to-orange-400 rounded-bl-lg md:rounded-bl-xl shadow-inner border-l border-b border-orange-500/20" />
               
-              {/* Microphone inside Note */}
-              <Mic className="text-teal-600 mt-0.5 sm:mt-1" size={isMobile ? 20 : 30} />
+              {/* Note Icon inside Note */}
+              <StickyNote className="text-teal-600 mt-0.5 sm:mt-1" size={isMobile ? 20 : 28} />
               
               {/* Bottom Gloss */}
               <div className="absolute bottom-0 left-0 right-0 h-1/2 bg-gradient-to-t from-teal-50/50 to-transparent" />
@@ -1835,32 +1830,10 @@ export default function App() {
             <div className="hidden md:flex items-center gap-2 mt-1.5">
               <div className="h-px w-3 bg-teal-500/30" />
               <p className={`text-[9px] font-black uppercase tracking-[0.15em] leading-none transition-colors duration-500 ${dashboardColor === '#1a1c1e' ? 'text-teal-400/60' : 'text-teal-600/80'}`}>
-                Voice Dictation & Smart Notes
+                Smart Notes & Canvas
               </p>
             </div>
           </div>
-          
-          {micPermissionStatus === 'denied' && (
-            <motion.div 
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              className="ml-1 sm:ml-3 md:ml-6 flex items-center gap-1.5 px-2 md:px-4 py-1 md:py-2 bg-red-500/10 border border-red-500/20 rounded-full text-red-600 text-[10px] md:text-xs font-bold shadow-sm cursor-help group relative"
-            >
-              <MicOff size={12} />
-              <span className="hidden xs:inline">Mic Error</span>
-              
-              <div className="absolute top-full left-0 mt-2 w-64 md:w-72 p-4 md:p-5 bg-white border border-black/10 rounded-2xl shadow-2xl text-slate-600 font-medium leading-relaxed opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-[1001]">
-                <p className="mb-2 uppercase text-[10px] font-black text-red-500 tracking-wider">Troubleshooting Required</p>
-                <div className="text-xs md:text-sm font-bold text-slate-800 mb-2">Error: {micErrorMessage || 'Access Denied'}</div>
-                <p className="mb-3 text-[12px] md:text-[13px]">To enable voice features:</p>
-                <ol className="list-decimal list-inside space-y-2 text-[12px] md:text-[13px]">
-                  <li>Click <strong>Lock 🔒</strong> in address bar</li>
-                  <li>Set <strong>Microphone</strong> to <strong>Allow</strong></li>
-                  <li><strong>Refresh</strong> the AI Studio page</li>
-                </ol>
-              </div>
-            </motion.div>
-          )}
         </div>
         
         <div className="flex items-center gap-1 sm:gap-1.5 md:gap-3 shrink-0">
@@ -2060,25 +2033,14 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-1.5 sm:gap-2">
-            {/* Quick Voice Note Button */}
-            <button
-              onClick={startNewVoiceNote}
-              className="px-2.5 sm:px-3.5 md:px-5 py-1.5 sm:py-2 md:py-3 bg-rose-500 hover:bg-rose-600 text-white rounded-xl md:rounded-[20px] text-[11px] sm:text-xs md:text-sm font-black flex items-center justify-center gap-1 sm:gap-1.5 transition-all hover:scale-105 active:scale-95 shadow-md shrink-0 min-h-[34px] sm:min-h-[40px]"
-              title="Record Voice Note"
-              aria-label="Record Voice Note"
-            >
-              <Mic size={16} className="md:w-[18px] md:h-[18px]" />
-              <span className="hidden sm:inline">VOICE</span>
-            </button>
-
             <button
               onClick={() => addNote()}
-              className="group/btn px-2.5 sm:px-4 md:px-8 py-1.5 sm:py-2 md:py-3 bg-indigo-600 text-white rounded-xl md:rounded-[20px] text-[11px] sm:text-xs md:text-sm font-black flex items-center justify-center gap-1 sm:gap-2 transition-all hover:scale-105 hover:bg-indigo-700 active:scale-95 shadow-md shrink-0 min-h-[34px] sm:min-h-[40px] relative overflow-hidden"
+              className="group/btn px-3 sm:px-5 md:px-8 py-1.5 sm:py-2 md:py-3 bg-indigo-600 text-white rounded-xl md:rounded-[20px] text-[11px] sm:text-xs md:text-sm font-black flex items-center justify-center gap-1.5 sm:gap-2 transition-all hover:scale-105 hover:bg-indigo-700 active:scale-95 shadow-md shrink-0 min-h-[34px] sm:min-h-[40px] relative overflow-hidden"
             >
               <div className="absolute inset-0 bg-white/10 opacity-0 group-hover/btn:opacity-100 transition-opacity" />
               <Plus size={16} className="md:w-[18px] md:h-[18px]" />
-              <span className="hidden md:inline">NEW NOTE</span>
-              <span className="md:hidden">ADD</span>
+              <span className="hidden sm:inline">NEW NOTE</span>
+              <span className="sm:hidden">ADD NOTE</span>
             </button>
           </div>
         </div>
@@ -2342,7 +2304,7 @@ export default function App() {
                   <Pencil size={18} className="md:w-[22px] md:h-[22px]" />
                 </button>
 
-                {/* Voice Dictation Button - Explicitly visible and interactive on both mobile and desktop */}
+                {/* Voice Dictation Button - Scoped strictly to note editor */}
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -2352,17 +2314,24 @@ export default function App() {
                       startVoiceRecording('note', e);
                     }
                   }}
-                  className={`min-w-[38px] min-h-[38px] sm:min-w-[42px] sm:min-h-[42px] p-2 md:p-3 rounded-xl md:rounded-2xl transition-all flex items-center justify-center active:scale-95 ${
+                  className={`min-w-[38px] min-h-[38px] sm:min-w-[42px] sm:min-h-[42px] px-2.5 sm:px-3 py-1.5 sm:py-2 md:px-3.5 md:py-2.5 rounded-xl md:rounded-2xl transition-all flex items-center justify-center gap-1.5 active:scale-95 font-bold text-xs ${
                     isRecording 
                       ? 'bg-red-500 text-white shadow-lg animate-pulse ring-2 ring-red-400' 
                       : micPermissionStatus === 'denied'
-                        ? 'bg-red-50 text-red-400 border border-red-200'
-                        : 'bg-black/5 hover:bg-black/10 text-slate-700 hover:text-red-500'
+                        ? 'bg-red-50 text-red-500 border border-red-200'
+                        : 'bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200/60'
                   }`}
-                  title={isRecording ? "Stop Voice Dictation" : (micPermissionStatus === 'denied' ? "Mic Blocked" : "Voice to Note")}
+                  title={isRecording ? "Stop Voice Dictation" : (micPermissionStatus === 'denied' ? "Microphone Blocked" : "Voice Dictate to Note")}
                   aria-label="Voice Dictation"
                 >
-                  {micPermissionStatus === 'denied' ? <MicOff size={18} className="md:w-[22px] md:h-[22px]" /> : <Mic size={18} className="md:w-[22px] md:h-[22px]" />}
+                  {micPermissionStatus === 'denied' ? (
+                    <MicOff size={18} className="md:w-5 md:h-5 text-red-500" />
+                  ) : (
+                    <Mic size={18} className={`md:w-5 md:h-5 ${isRecording ? 'text-white' : 'text-rose-600'}`} />
+                  )}
+                  <span className="hidden xs:inline text-[11px] font-black uppercase tracking-wider">
+                    {isRecording ? 'Listening...' : 'Dictate'}
+                  </span>
                 </button>
 
                 {/* Gallery Button - Direct on md screens */}
@@ -2827,38 +2796,6 @@ export default function App() {
                         </div>
                       )}
                       
-                      {/* Voice Recording HUD */}
-                      {isRecording && (
-                        <motion.div 
-                          initial={{ opacity: 0, scale: 0.95 }}
-                          animate={{ opacity: 1, scale: 1 }}
-                          className="absolute inset-x-3 sm:inset-x-6 bottom-3 sm:bottom-6 bg-slate-900/95 backdrop-blur-2xl border border-white/10 p-5 sm:p-6 md:p-8 rounded-[24px] md:rounded-[32px] z-50 flex flex-col items-center justify-center text-white shadow-2xl max-w-full"
-                        >
-                          <div className="bg-indigo-600 p-3.5 sm:p-5 rounded-full mb-3 sm:mb-4 animate-pulse shadow-[0_0_30px_rgba(79,70,229,0.3)]">
-                            <Mic size={24} className="md:w-8 md:h-8 text-white" />
-                          </div>
-                          <span className="tracking-[0.25em] uppercase text-[9px] md:text-[10px] font-black text-white/50 mb-1.5">Live Voice Dictation</span>
-                          {liveInterimText ? (
-                            <div className="w-full max-w-md my-2 px-3.5 py-2.5 bg-indigo-500/20 border border-indigo-400/40 rounded-xl text-indigo-100 text-xs sm:text-sm font-semibold text-center animate-pulse break-words">
-                              "{liveInterimText}"
-                            </div>
-                          ) : (
-                            <p className="text-[11px] sm:text-xs text-indigo-300 font-medium mb-3 text-center max-w-xs leading-relaxed">
-                              Speak naturally. Words appear instantly in real-time as you speak.
-                            </p>
-                          )}
-                          <p className="text-[10px] text-white/40 font-medium mb-4 text-center max-w-xs">
-                            Commands: "bold [words]", "underline [words]", "period", "comma", "new line"
-                          </p>
-                          <button 
-                            onClick={() => stopVoiceRecording()}
-                            className="w-full min-h-[44px] px-6 py-3 bg-white text-slate-950 rounded-xl md:rounded-2xl text-[11px] font-black uppercase tracking-widest hover:bg-slate-100 transition-all shadow-lg active:scale-95 flex items-center justify-center"
-                          >
-                            Stop Listening
-                          </button>
-                        </motion.div>
-                      )}
-                      
                       <div ref={chatEndRef} />
                     </div>
 
@@ -2873,30 +2810,9 @@ export default function App() {
                             committedChatPrefixRef.current = val;
                           }}
                           onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
-                          placeholder={isRecording ? (liveInterimText ? `Hearing: "${liveInterimText}"` : "Listening... speak now") : "Message Vocal..."}
+                          placeholder="Message Vocal AI..."
                           className="flex-1 bg-white/5 border border-white/5 rounded-xl md:rounded-2xl px-3.5 sm:px-6 py-2.5 sm:py-4 text-sm md:text-[15px] text-white placeholder:text-white/30 focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all font-medium min-h-[44px]"
                         />
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (isRecording || shouldKeepRecordingRef.current) {
-                              stopVoiceRecording();
-                            } else {
-                              startVoiceRecording('chat', e);
-                            }
-                          }}
-                          disabled={isLoading}
-                          className={`min-w-[44px] min-h-[44px] p-2.5 md:p-4 rounded-xl md:rounded-2xl transition-all transform active:scale-95 flex items-center justify-center ${
-                            isRecording 
-                              ? 'bg-red-500 text-white animate-pulse' 
-                              : micPermissionStatus === 'denied'
-                                ? 'bg-red-500/10 text-red-400'
-                                : 'bg-white/5 text-white/20 hover:text-white hover:bg-white/10'
-                          }`}
-                          title={micPermissionStatus === 'denied' ? "Mic Blocked" : "Voice Input"}
-                        >
-                          {micPermissionStatus === 'denied' ? <MicOff size={20} className="md:w-[22px] md:h-[22px]" /> : <Mic size={20} className="md:w-[22px] md:h-[22px]" />}
-                        </button>
                       </div>
                       <button
                         onClick={handleSendMessage}
