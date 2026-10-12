@@ -12,6 +12,12 @@ import { Stage, Layer, Line as KonvaLine } from 'react-konva';
 import { postProcessSpeechTranscript, aiPostProcessSpeech } from './speechPostProcessor';
 import { PWAInstallButton } from './PWAInstallButton';
 import { OfflineIndicator } from './OfflineIndicator';
+import { useAuth } from './context/AuthContext';
+import { LoginForm } from './components/auth/LoginForm';
+import { OnboardingWizard } from './components/auth/OnboardingWizard';
+import { SubscriptionModal } from './components/auth/SubscriptionModal';
+import { LogoutConfirmModal } from './components/auth/LogoutConfirmModal';
+import { UserProfileDropdown } from './components/auth/UserProfileDropdown';
 
 interface DrawingLine {
   tool: string;
@@ -371,7 +377,8 @@ function isCaretAtStartOfNode(container: Node, offset: number, rootNode: Node): 
   return false;
 }
 
-export default function App() {
+function NotesApp() {
+  const { user } = useAuth();
   const [notes, setNotes] = useState<Note[]>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [viewMode, setViewMode] = useState<'grid' | 'board'>('grid');
@@ -2027,6 +2034,9 @@ export default function App() {
               <span className="hidden sm:inline">NEW NOTE</span>
               <span className="sm:hidden">ADD NOTE</span>
             </button>
+
+            {/* User Profile & Subscription Account Menu */}
+            <UserProfileDropdown />
           </div>
         </div>
       </header>
@@ -2942,5 +2952,25 @@ export default function App() {
         .note-content h1, .note-content h2, .note-content h3 { margin: 0 0 0.35em 0; line-height: 1.2; }
       `}</style>
     </div>
+  );
+}
+
+export default function App() {
+  const { isAuthenticated, isOnboarded } = useAuth();
+
+  if (!isAuthenticated) {
+    return <LoginForm />;
+  }
+
+  if (!isOnboarded) {
+    return <OnboardingWizard />;
+  }
+
+  return (
+    <>
+      <NotesApp />
+      <SubscriptionModal />
+      <LogoutConfirmModal />
+    </>
   );
 }
