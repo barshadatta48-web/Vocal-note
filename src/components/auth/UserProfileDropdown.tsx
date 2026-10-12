@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { User, LogOut, Sparkles, Zap, ChevronDown, CheckCircle2, Shield, Settings, X, CreditCard } from 'lucide-react';
+import { User, LogOut, ChevronDown, Settings, X, CreditCard, Sparkles } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
 export const UserProfileDropdown: React.FC = () => {
@@ -36,13 +36,7 @@ export const UserProfileDropdown: React.FC = () => {
 
   const tier = user.subscriptionTier;
   const tierLabel =
-    tier === 'base' ? 'Featured Base' : tier === 'pro' ? 'Pro Studio' : 'Free Starter';
-  const tierColor =
-    tier === 'base'
-      ? 'bg-teal-100 text-teal-800 border-teal-200'
-      : tier === 'pro'
-      ? 'bg-indigo-100 text-indigo-800 border-indigo-200'
-      : 'bg-slate-100 text-slate-700 border-slate-200';
+    tier === 'base' ? 'Featured Base' : tier === 'pro' ? 'Pro Studio' : 'Starter';
 
   const handleToggle = () => {
     if (window.innerWidth < 768) {
@@ -53,12 +47,12 @@ export const UserProfileDropdown: React.FC = () => {
   };
 
   return (
-    <div className="relative font-sans" ref={dropdownRef}>
-      {/* Profile Trigger Button in Header */}
+    <div className="relative font-sans antialiased" ref={dropdownRef}>
+      {/* Profile Trigger Button in Header (minimum 44-48px touch target) */}
       <button
         type="button"
         onClick={handleToggle}
-        className="min-h-[38px] sm:min-h-[42px] p-1 sm:p-1.5 md:pr-3 rounded-full md:rounded-2xl bg-white/70 hover:bg-white border border-black/5 hover:border-black/10 transition-all flex items-center gap-2 group active:scale-95 shadow-xs"
+        className="min-h-[44px] min-w-[44px] p-1 sm:px-2 rounded-xl bg-white hover:bg-zinc-50 border border-zinc-200/80 transition-all flex items-center gap-2 group active:scale-[0.98] shadow-xs"
         title="Account & Subscription"
         aria-label="User Account Menu"
       >
@@ -66,106 +60,90 @@ export const UserProfileDropdown: React.FC = () => {
           <img
             src={user.avatar}
             alt={user.name}
-            className="w-7 h-7 sm:w-8 sm:h-8 rounded-full object-cover ring-2 ring-teal-500/30"
+            className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg object-cover ring-1 ring-zinc-200"
           />
           {tier === 'base' && (
             <span
-              className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-teal-500 border-2 border-white rounded-full shadow-xs"
+              className="absolute -bottom-0.5 -right-0.5 w-2 h-2 bg-zinc-900 border border-white rounded-full"
               title="Featured Base Plan Active"
             />
           )}
         </div>
 
         <div className="hidden md:flex flex-col items-start text-left leading-none">
-          <span className="text-[11px] font-black text-slate-800 truncate max-w-[100px]">
+          <span className="text-xs font-semibold text-zinc-900 truncate max-w-[100px]">
             {user.name.split(' ')[0]}
           </span>
-          <span className="text-[9px] font-bold text-teal-700 tracking-wider uppercase mt-0.5">
-            {tier === 'base' ? 'Base Tier' : tier.toUpperCase()}
+          <span className="text-[10px] font-medium text-zinc-400 mt-0.5">
+            {tier === 'base' ? 'Base Tier' : tierLabel}
           </span>
         </div>
 
         <ChevronDown
-          size={14}
-          className="hidden md:block text-slate-400 group-hover:text-slate-700 transition-transform duration-200"
+          size={13}
+          className="hidden md:block text-zinc-400 group-hover:text-zinc-700 transition-colors"
         />
       </button>
 
-      {/* Desktop Dropdown Menu */}
+      {/* Desktop Minimal Dropdown */}
       <AnimatePresence>
         {isOpen && (
           <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: -8 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: -8 }}
+            initial={{ opacity: 0, y: -6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6 }}
             transition={{ duration: 0.15 }}
-            className="hidden md:block absolute right-0 top-full mt-2 w-80 bg-white/95 backdrop-blur-2xl rounded-2xl shadow-2xl border border-black/10 z-[1000] overflow-hidden text-slate-800"
+            className="hidden md:block absolute right-0 top-full mt-2 w-72 bg-white rounded-2xl shadow-md border border-zinc-200/80 z-[1000] overflow-hidden text-zinc-900"
           >
             {/* Header User Summary */}
-            <div className="p-4 bg-slate-50/90 border-b border-black/5">
+            <div className="p-4 border-b border-zinc-100">
               <div className="flex items-center gap-3">
                 <img
                   src={user.avatar}
                   alt={user.name}
-                  className="w-12 h-12 rounded-2xl object-cover ring-2 ring-white shadow-sm"
+                  className="w-10 h-10 rounded-xl object-cover ring-1 ring-zinc-200"
                 />
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center justify-between">
-                    <h4 className="text-sm font-extrabold text-slate-900 truncate">{user.name}</h4>
-                  </div>
-                  <p className="text-xs text-slate-500 truncate">{user.email}</p>
-                  <span className="inline-block mt-1 text-[10px] font-semibold text-slate-600 bg-slate-200/60 px-2 py-0.5 rounded-md">
+                  <h4 className="text-xs font-bold text-zinc-900 truncate">{user.name}</h4>
+                  <p className="text-[11px] text-zinc-400 truncate">{user.email}</p>
+                  <span className="inline-block mt-1 text-[10px] font-medium text-zinc-500">
                     {user.role}
                   </span>
                 </div>
               </div>
             </div>
 
-            {/* Active Subscription Badge Card */}
-            <div className="p-3.5 border-b border-black/5 bg-gradient-to-r from-teal-50/50 via-white to-indigo-50/50">
-              <div className="flex items-center justify-between">
-                <div>
-                  <span className="text-[10px] font-bold uppercase text-slate-400 block">Subscription Tier</span>
-                  <div className="flex items-center gap-1.5 mt-0.5">
-                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold border ${tierColor}`}>
-                      {tierLabel}
-                    </span>
-                    {tier === 'base' && <Sparkles size={13} className="text-amber-500" />}
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsOpen(false);
-                    openSubscriptionModal();
-                  }}
-                  className="min-h-[34px] px-3 py-1 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold shadow-xs transition-all flex items-center gap-1 active:scale-95"
-                >
-                  <CreditCard size={12} />
-                  <span>{tier === 'base' ? 'Plan Details' : 'Upgrade'}</span>
-                </button>
+            {/* Active Subscription Tier Summary */}
+            <div className="p-3.5 bg-zinc-50 border-b border-zinc-100 flex items-center justify-between">
+              <div>
+                <span className="text-[10px] text-zinc-400 uppercase font-semibold block">Plan</span>
+                <span className="text-xs font-bold text-zinc-900">{tierLabel}</span>
               </div>
 
-              {tier === 'base' && (
-                <p className="text-[11px] text-teal-800 font-medium mt-2 leading-tight">
-                  ✓ 15 GB Cloud Storage Active · Unlimited Voice Dictation
-                </p>
-              )}
-            </div>
-
-            {/* Actions list */}
-            <div className="p-2 space-y-1">
               <button
                 type="button"
                 onClick={() => {
                   setIsOpen(false);
                   openSubscriptionModal();
                 }}
-                className="w-full min-h-[40px] px-3 py-2 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-100/80 transition-colors flex items-center gap-2.5 text-left"
+                className="min-h-[34px] px-3 rounded-lg bg-zinc-900 hover:bg-black text-white text-[11px] font-semibold transition-colors"
               >
-                <Zap size={15} className="text-teal-600" />
-                <span>Featured Base Pricing & Plans</span>
+                {tier === 'base' ? 'Plan Specs' : 'Upgrade'}
+              </button>
+            </div>
+
+            {/* Actions */}
+            <div className="p-1.5 space-y-0.5">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsOpen(false);
+                  openSubscriptionModal();
+                }}
+                className="w-full min-h-[40px] px-3 rounded-lg text-xs font-medium text-zinc-700 hover:bg-zinc-50 transition-colors flex items-center gap-2 text-left"
+              >
+                <CreditCard size={14} className="text-zinc-500" />
+                <span>Featured Base Pricing (₹)</span>
               </button>
 
               <button
@@ -174,24 +152,23 @@ export const UserProfileDropdown: React.FC = () => {
                   setIsOpen(false);
                   restartOnboarding();
                 }}
-                className="w-full min-h-[40px] px-3 py-2 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-100/80 transition-colors flex items-center gap-2.5 text-left"
+                className="w-full min-h-[40px] px-3 rounded-lg text-xs font-medium text-zinc-700 hover:bg-zinc-50 transition-colors flex items-center gap-2 text-left"
               >
-                <Settings size={15} className="text-slate-500" />
-                <span>Review Workspace Preferences</span>
+                <Settings size={14} className="text-zinc-500" />
+                <span>Revisit Onboarding</span>
               </button>
 
-              <div className="h-px bg-slate-100 my-1" />
+              <div className="h-px bg-zinc-100 my-1" />
 
-              {/* Sign Out Button */}
               <button
                 type="button"
                 onClick={() => {
                   setIsOpen(false);
                   openLogoutModal();
                 }}
-                className="w-full min-h-[40px] px-3 py-2 rounded-xl text-xs font-bold text-rose-600 hover:bg-rose-50 transition-colors flex items-center gap-2.5 text-left"
+                className="w-full min-h-[40px] px-3 rounded-lg text-xs font-medium text-rose-600 hover:bg-rose-50 transition-colors flex items-center gap-2 text-left"
               >
-                <LogOut size={15} />
+                <LogOut size={14} />
                 <span>Sign Out</span>
               </button>
             </div>
@@ -199,7 +176,7 @@ export const UserProfileDropdown: React.FC = () => {
         )}
       </AnimatePresence>
 
-      {/* Mobile Slide-Out Drawer / Modal Sheet */}
+      {/* Mobile Slide-Up Drawer / Bottom Sheet */}
       <AnimatePresence>
         {isProfileDrawerOpen && (
           <div className="fixed inset-0 z-[1200] md:hidden font-sans">
@@ -209,32 +186,30 @@ export const UserProfileDropdown: React.FC = () => {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={closeProfileDrawer}
-              className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm"
+              className="fixed inset-0 bg-zinc-900/40 backdrop-blur-xs"
             />
 
-            {/* Slide-Up / Slide-In Drawer */}
+            {/* Drawer */}
             <motion.div
               initial={{ y: '100%' }}
               animate={{ y: 0 }}
               exit={{ y: '100%' }}
-              transition={{ type: 'spring', damping: 25, stiffness: 220 }}
-              className="fixed bottom-0 left-0 right-0 max-h-[90vh] bg-white rounded-t-3xl shadow-2xl border-t border-black/10 overflow-hidden flex flex-col"
+              transition={{ type: 'spring', damping: 26, stiffness: 240 }}
+              className="fixed bottom-0 left-0 right-0 max-h-[85vh] bg-white rounded-t-3xl border-t border-zinc-200/80 shadow-lg overflow-hidden flex flex-col"
             >
-              {/* Drawer Handle */}
-              <div className="w-12 h-1.5 bg-slate-300 rounded-full mx-auto my-3" />
+              <div className="w-10 h-1 bg-zinc-300 rounded-full mx-auto my-3" />
 
-              {/* Header */}
-              <div className="px-5 pb-4 flex items-center justify-between border-b border-slate-100">
+              <div className="px-5 pb-4 flex items-center justify-between border-b border-zinc-100">
                 <div className="flex items-center gap-3">
                   <img
                     src={user.avatar}
                     alt={user.name}
-                    className="w-12 h-12 rounded-2xl object-cover ring-2 ring-teal-500/20"
+                    className="w-11 h-11 rounded-xl object-cover ring-1 ring-zinc-200"
                   />
                   <div>
-                    <h3 className="text-base font-extrabold text-slate-900">{user.name}</h3>
-                    <p className="text-xs text-slate-500">{user.email}</p>
-                    <span className="text-[10px] font-semibold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md inline-block mt-1">
+                    <h3 className="text-sm font-bold text-zinc-900">{user.name}</h3>
+                    <p className="text-xs text-zinc-400">{user.email}</p>
+                    <span className="text-[10px] text-zinc-500 font-medium">
                       {user.role}
                     </span>
                   </div>
@@ -242,79 +217,62 @@ export const UserProfileDropdown: React.FC = () => {
 
                 <button
                   onClick={closeProfileDrawer}
-                  className="p-2 text-slate-400 hover:text-slate-600 rounded-full"
+                  className="w-10 h-10 flex items-center justify-center text-zinc-400 hover:text-zinc-700 rounded-full"
                 >
-                  <X size={20} />
+                  <X size={18} />
                 </button>
               </div>
 
-              {/* Drawer Body */}
               <div className="p-5 space-y-4 overflow-y-auto">
-                {/* Subscription Tier Card */}
-                <div className="p-4 rounded-2xl bg-gradient-to-br from-teal-50/80 via-white to-indigo-50/80 border border-teal-200/80 shadow-xs">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <span className="text-[10px] uppercase font-bold text-slate-400 block">Current Tier</span>
-                      <div className="flex items-center gap-1.5 mt-0.5">
-                        <span className={`px-2.5 py-0.5 rounded-full text-xs font-black border ${tierColor}`}>
-                          {tierLabel}
-                        </span>
-                        {tier === 'base' && <Sparkles size={14} className="text-amber-500" />}
-                      </div>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={openSubscriptionModal}
-                      className="min-h-[44px] px-4 py-2 bg-teal-600 text-white rounded-xl text-xs font-bold shadow-xs active:scale-95"
-                    >
-                      {tier === 'base' ? 'Plan Specs' : 'Upgrade Plan'}
-                    </button>
+                {/* Active Plan Card */}
+                <div className="p-4 rounded-2xl bg-zinc-50 border border-zinc-200/80 flex items-center justify-between">
+                  <div>
+                    <span className="text-[10px] text-zinc-400 uppercase font-semibold block">Active Plan</span>
+                    <span className="text-sm font-bold text-zinc-900">{tierLabel}</span>
+                    <p className="text-[11px] text-zinc-500 mt-0.5">
+                      {tier === 'base' ? '15 GB Storage · Unlimited Audio' : 'Personal Starter'}
+                    </p>
                   </div>
 
-                  <p className="text-xs text-slate-600 mt-2.5">
-                    {tier === 'base'
-                      ? '✓ 15 GB Cloud Storage Active · Unlimited Voice Dictation'
-                      : 'Upgrade to Featured Base for unlimited audio and cloud backups.'}
-                  </p>
-                </div>
-
-                {/* Quick actions */}
-                <div className="space-y-2">
                   <button
                     type="button"
                     onClick={openSubscriptionModal}
-                    className="w-full min-h-[46px] px-4 py-3 bg-slate-50 hover:bg-slate-100 rounded-xl text-xs font-bold text-slate-800 flex items-center justify-between"
+                    className="min-h-[48px] px-4 rounded-xl bg-zinc-900 text-white text-xs font-semibold"
                   >
-                    <div className="flex items-center gap-2.5">
-                      <Zap size={16} className="text-teal-600" />
-                      <span>Featured Base Subscription (₹ Pricing)</span>
-                    </div>
-                    <span className="text-slate-400">›</span>
+                    {tier === 'base' ? 'Plan Details' : 'Upgrade Plan'}
+                  </button>
+                </div>
+
+                {/* Navigation items (all >= 48px touch targets) */}
+                <div className="space-y-1.5">
+                  <button
+                    type="button"
+                    onClick={openSubscriptionModal}
+                    className="w-full min-h-[48px] px-4 rounded-xl text-xs font-medium text-zinc-800 hover:bg-zinc-50 border border-zinc-200 flex items-center justify-between"
+                  >
+                    <span>Featured Base Subscription (₹)</span>
+                    <span className="text-zinc-400">›</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={restartOnboarding}
-                    className="w-full min-h-[46px] px-4 py-3 bg-slate-50 hover:bg-slate-100 rounded-xl text-xs font-bold text-slate-800 flex items-center justify-between"
+                    className="w-full min-h-[48px] px-4 rounded-xl text-xs font-medium text-zinc-800 hover:bg-zinc-50 border border-zinc-200 flex items-center justify-between"
                   >
-                    <div className="flex items-center gap-2.5">
-                      <Settings size={16} className="text-slate-600" />
-                      <span>Revisit Onboarding & Setup</span>
-                    </div>
-                    <span className="text-slate-400">›</span>
+                    <span>Revisit Onboarding Wizard</span>
+                    <span className="text-zinc-400">›</span>
                   </button>
                 </div>
 
-                {/* Sign out */}
+                {/* Sign Out */}
                 <div className="pt-2">
                   <button
                     type="button"
                     onClick={openLogoutModal}
-                    className="w-full min-h-[48px] px-4 py-3 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl text-xs font-bold flex items-center justify-center gap-2 active:scale-95 transition-colors"
+                    className="w-full min-h-[48px] px-4 bg-zinc-100 hover:bg-rose-50 text-rose-600 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 border border-zinc-200 transition-colors"
                   >
-                    <LogOut size={16} />
-                    <span>Sign Out of Vocal Note</span>
+                    <LogOut size={15} />
+                    <span>Log Out of Vocal Note</span>
                   </button>
                 </div>
               </div>

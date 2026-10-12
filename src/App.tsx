@@ -13,9 +13,9 @@ import { postProcessSpeechTranscript, aiPostProcessSpeech } from './speechPostPr
 import { PWAInstallButton } from './PWAInstallButton';
 import { OfflineIndicator } from './OfflineIndicator';
 import { useAuth } from './context/AuthContext';
-import { LoginForm } from './components/auth/LoginForm';
-import { OnboardingWizard } from './components/auth/OnboardingWizard';
-import { SubscriptionModal } from './components/auth/SubscriptionModal';
+import { AuthScreen } from './components/auth/AuthScreen';
+import { OnboardingFlow } from './components/auth/OnboardingFlow';
+import { SubscriptionView } from './components/auth/SubscriptionView';
 import { LogoutConfirmModal } from './components/auth/LogoutConfirmModal';
 import { UserProfileDropdown } from './components/auth/UserProfileDropdown';
 
@@ -2959,17 +2959,17 @@ export default function App() {
   const { isAuthenticated, isOnboarded } = useAuth();
 
   if (!isAuthenticated) {
-    return <LoginForm />;
+    return <AuthScreen />;
   }
 
   if (!isOnboarded) {
-    return <OnboardingWizard />;
+    return <OnboardingFlow />;
   }
 
   return (
     <>
       <NotesApp />
-      <SubscriptionModal />
+      <SubscriptionView />
       <LogoutConfirmModal />
     </>
   );
