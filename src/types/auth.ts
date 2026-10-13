@@ -31,6 +31,7 @@ export interface UserProfile {
   useCase?: string;
   themePreference?: string;
   subscriptionTier: SubscriptionTier;
+  subscription_plan?: string;
   billingCycle: BillingCycle;
   createdAt: string;
 

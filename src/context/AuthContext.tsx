@@ -67,6 +67,7 @@ const DEFAULT_DEMO_USER: UserProfile = {
   useCase: 'Voice Brainstorming & Daily Notes',
   themePreference: 'Ocean Teal',
   subscriptionTier: 'base',
+  subscription_plan: 'base',
   billingCycle: 'monthly',
   isFirstLogin: false,
   createdAt: new Date().toISOString(),
@@ -265,6 +266,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           useCase: 'Voice Ideation',
           themePreference: 'Ocean Teal',
           subscriptionTier: 'base',
+          subscription_plan: 'base',
           billingCycle: 'monthly',
           sessionToken: token,
           isFirstLogin: false,
@@ -321,6 +323,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       role: isStudentEmail ? 'Student / Scholar' : 'Member',
       avatar: `https://api.dicebear.com/7.x/notionists/svg?seed=${encodeURIComponent(cleanName)}&backgroundColor=e2e8f0`,
       subscriptionTier: 'free',
+      subscription_plan: 'free',
       billingCycle: 'monthly',
       sessionToken: token,
       isFirstLogin: true,
@@ -494,6 +497,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const updated: UserProfile = {
       ...user,
       subscriptionTier: tier,
+      subscription_plan: tier,
       billingCycle: cycle,
     };
 

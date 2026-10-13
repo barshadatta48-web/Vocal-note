@@ -48,9 +48,13 @@ export const UserProfileDropdown: React.FC = () => {
 
   if (!user) return null;
 
+  // Reference active subscription plan from user session
+  const activePlan = (user.subscription_plan || user.subscriptionTier || 'free').toLowerCase();
+  const isStudentPlan = activePlan === 'student';
+
   const tier = user.subscriptionTier;
   const tierLabel =
-    tier === 'student'
+    tier === 'student' || isStudentPlan
       ? 'Student Plan'
       : tier === 'base'
       ? 'Featured Base'
@@ -86,19 +90,17 @@ export const UserProfileDropdown: React.FC = () => {
             alt={user.name}
             className="w-8 h-8 rounded-lg object-cover ring-1 ring-zinc-200"
           />
-          {isStudentVerified ? (
+          {isStudentPlan ? (
             <span
               className="absolute -bottom-1 -right-1 w-3.5 h-3.5 rounded-full bg-emerald-600 border-2 border-white flex items-center justify-center text-white"
-              title="Verified Student"
+              title="Verified Student Plan"
             >
               <span className="text-[7px] font-black leading-none">🎓</span>
             </span>
           ) : (
             <span
               className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-white ${
-                tier === 'student'
-                  ? 'bg-emerald-500'
-                  : tier === 'base'
+                tier === 'base'
                   ? 'bg-zinc-900'
                   : tier === 'pro'
                   ? 'bg-indigo-600'
@@ -114,7 +116,8 @@ export const UserProfileDropdown: React.FC = () => {
             <span className="text-xs font-semibold text-zinc-800 truncate max-w-[110px]">
               {user.name}
             </span>
-            {isStudentVerified && (
+            {/* Green STUDENT badge - conditionally rendered ONLY when active subscription plan is 'student' */}
+            {isStudentPlan && (
               <span className="text-[9px] font-extrabold uppercase bg-emerald-100 text-emerald-800 px-1 py-0.2 rounded">
                 Student
               </span>
@@ -150,8 +153,8 @@ export const UserProfileDropdown: React.FC = () => {
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
                     <h4 className="text-xs font-bold text-zinc-900 truncate">{user.name}</h4>
-                    {isStudentVerified && (
-                      <span title="Verified Student" className="inline-flex">
+                    {isStudentPlan && (
+                      <span title="Student Plan" className="inline-flex">
                         <CheckCircle2 size={13} className="text-emerald-600 shrink-0" />
                       </span>
                     )}
@@ -336,7 +339,7 @@ export const UserProfileDropdown: React.FC = () => {
                   <div>
                     <div className="flex items-center gap-2">
                       <h3 className="text-sm font-bold text-zinc-900">{user.name}</h3>
-                      {isStudentVerified && (
+                      {isStudentPlan && (
                         <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800">
                           Student
                         </span>
