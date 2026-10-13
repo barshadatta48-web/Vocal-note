@@ -1,4 +1,4 @@
-export type SubscriptionTier = 'free' | 'base' | 'pro';
+export type SubscriptionTier = 'free' | 'base' | 'pro' | 'student';
 export type BillingCycle = 'monthly' | 'annual';
 
 export interface AuthSession {
@@ -17,6 +17,8 @@ export interface AuthNotification {
   message: string;
 }
 
+export type StudentVerificationStatus = 'none' | 'pending' | 'verified' | 'rejected';
+
 export interface UserProfile {
   id: string;
   name: string;
@@ -31,6 +33,17 @@ export interface UserProfile {
   subscriptionTier: SubscriptionTier;
   billingCycle: BillingCycle;
   createdAt: string;
+
+  // Student Subscription & Verification Schema
+  is_student?: boolean;
+  student_verification_status?: StudentVerificationStatus;
+  institution_name?: string;
+  student_email?: string;
+  verification_document_url?: string;
+  verification_document_name?: string;
+  graduation_year?: string;
+  student_verified_at?: string;
+  rejection_reason?: string;
 }
 
 export interface OnboardingData {
@@ -52,6 +65,7 @@ export interface SubscriptionPlan {
   annualBilledTotalINR: number;
   discountTag?: string;
   isFeatured?: boolean;
+  isStudentOnly?: boolean;
   features: string[];
   specs: {
     storageLimit: string;

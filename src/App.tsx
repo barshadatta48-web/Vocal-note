@@ -17,6 +17,7 @@ import { AuthGuard } from './components/auth/AuthGuard';
 import { AuthScreen } from './components/auth/AuthScreen';
 import { OnboardingFlow } from './components/auth/OnboardingFlow';
 import { SubscriptionView } from './components/auth/SubscriptionView';
+import { StudentVerificationModal } from './components/auth/StudentVerificationModal';
 import { LogoutConfirmModal } from './components/auth/LogoutConfirmModal';
 import { UserProfileDropdown } from './components/auth/UserProfileDropdown';
 
@@ -2961,6 +2962,7 @@ export default function App() {
     <AuthGuard>
       <NotesApp />
       <SubscriptionView />
+      <StudentVerificationModal />
       <LogoutConfirmModal />
     </AuthGuard>
   );

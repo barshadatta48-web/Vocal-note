@@ -1,11 +1,29 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Check, X, ArrowRight, ShieldCheck, Zap, Lock, CheckCircle2 } from 'lucide-react';
+import {
+  Check,
+  X,
+  ArrowRight,
+  ShieldCheck,
+  Lock,
+  CheckCircle2,
+  GraduationCap,
+  Sparkles,
+  Clock,
+  AlertCircle,
+  ExternalLink,
+} from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { SubscriptionTier, BillingCycle } from '../../types/auth';
 
 export const SubscriptionView: React.FC = () => {
-  const { user, isSubscriptionModalOpen, closeSubscriptionModal, upgradeSubscription } = useAuth();
+  const {
+    user,
+    isSubscriptionModalOpen,
+    closeSubscriptionModal,
+    upgradeSubscription,
+    openStudentVerificationModal,
+  } = useAuth();
 
   const [billingCycle, setBillingCycle] = useState<BillingCycle>('annual');
   const [selectedTier, setSelectedTier] = useState<SubscriptionTier | null>(null);
@@ -17,9 +35,23 @@ export const SubscriptionView: React.FC = () => {
   if (!isSubscriptionModalOpen) return null;
 
   const currentTier = user?.subscriptionTier || 'free';
+  const studentStatus = user?.student_verification_status || 'none';
+  const isStudentVerified = studentStatus === 'verified';
+  const isStudentPending = studentStatus === 'pending';
 
   const handleSelect = (tier: SubscriptionTier) => {
     if (tier === currentTier) return;
+
+    // Student plan gate check
+    if (tier === 'student') {
+      if (!isStudentVerified) {
+        // Automatically trigger verification workflow
+        closeSubscriptionModal();
+        openStudentVerificationModal();
+        return;
+      }
+    }
+
     setSelectedTier(tier);
     setCheckoutStep('checkout');
   };
@@ -29,8 +61,10 @@ export const SubscriptionView: React.FC = () => {
     setIsAuthorizing(true);
     await new Promise((res) => setTimeout(res, 750));
     setIsAuthorizing(false);
-    upgradeSubscription(selectedTier, billingCycle);
-    setCheckoutStep('success');
+    const success = upgradeSubscription(selectedTier, billingCycle);
+    if (success) {
+      setCheckoutStep('success');
+    }
   };
 
   const handleClose = () => {
@@ -41,8 +75,22 @@ export const SubscriptionView: React.FC = () => {
 
   const getPrice = (tier: SubscriptionTier) => {
     if (tier === 'free') return 0;
+    if (tier === 'student') return billingCycle === 'annual' ? 149 : 199;
     if (tier === 'base') return billingCycle === 'annual' ? 399 : 499;
     return billingCycle === 'annual' ? 799 : 999;
+  };
+
+  const getPlanName = (tier: SubscriptionTier) => {
+    switch (tier) {
+      case 'student':
+        return 'Student Plan (Verified Academic)';
+      case 'base':
+        return 'Featured Base Tier';
+      case 'pro':
+        return 'Pro Studio Tier';
+      default:
+        return 'Starter Plan';
+    }
   };
 
   return (
@@ -62,17 +110,21 @@ export const SubscriptionView: React.FC = () => {
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: 30 }}
         transition={{ duration: 0.2, ease: 'easeOut' }}
-        className="w-full max-w-4xl bg-white rounded-t-3xl sm:rounded-3xl border border-zinc-200/80 shadow-lg relative z-10 max-h-[92vh] sm:max-h-[88vh] flex flex-col overflow-hidden"
+        className="w-full max-w-5xl bg-white rounded-t-3xl sm:rounded-3xl border border-zinc-200/80 shadow-2xl relative z-10 max-h-[94vh] sm:max-h-[90vh] flex flex-col overflow-hidden"
       >
         {/* Mobile drag handle */}
         <div className="w-10 h-1 bg-zinc-300 rounded-full mx-auto mt-3 sm:hidden shrink-0" />
 
         {/* Top Header */}
-        <div className="px-5 sm:px-8 py-4 sm:py-5 border-b border-zinc-100 flex items-center justify-between shrink-0">
+        <div className="px-5 sm:px-8 py-4 sm:py-5 border-b border-zinc-100 flex items-center justify-between shrink-0 bg-white">
           <div>
-            <span className="text-[11px] font-semibold tracking-wider uppercase text-zinc-400">
-              Pricing & Plans
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-bold tracking-wider uppercase text-zinc-500">
+                Workspace Subscription Plans
+              </span>
+              <span className="text-zinc-300">·</span>
+              <span className="text-[11px] font-semibold text-zinc-400">INR (₹)</span>
+            </div>
             <h2 className="text-lg sm:text-xl font-bold tracking-tight text-zinc-900 mt-0.5">
               {checkoutStep === 'plans'
                 ? 'Choose your workspace plan'
@@ -93,9 +145,81 @@ export const SubscriptionView: React.FC = () => {
         </div>
 
         {/* Scrollable Content */}
-        <div className="px-5 sm:px-8 py-5 sm:py-6 overflow-y-auto flex-1">
+        <div className="px-5 sm:px-8 py-5 sm:py-6 overflow-y-auto flex-1 space-y-6">
           {checkoutStep === 'plans' && (
             <div className="space-y-6">
+              {/* Student Status Quick Notification Bar */}
+              <div
+                className={`p-3.5 rounded-2xl border flex items-center justify-between flex-wrap gap-3 transition-colors ${
+                  isStudentVerified
+                    ? 'bg-emerald-50/80 border-emerald-200 text-emerald-950'
+                    : isStudentPending
+                    ? 'bg-amber-50/80 border-amber-200 text-amber-950'
+                    : 'bg-zinc-50 border-zinc-200 text-zinc-800'
+                }`}
+              >
+                <div className="flex items-center gap-2.5">
+                  <div
+                    className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${
+                      isStudentVerified
+                        ? 'bg-emerald-600 text-white'
+                        : isStudentPending
+                        ? 'bg-amber-500 text-white'
+                        : 'bg-zinc-200 text-zinc-700'
+                    }`}
+                  >
+                    <GraduationCap size={16} />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold">
+                        {isStudentVerified
+                          ? 'Student Status Verified · 50% Discount Applied'
+                          : isStudentPending
+                          ? 'Student Verification In Review (Pending)'
+                          : 'Are you an active college or school student?'}
+                      </span>
+                      <span
+                        className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full ${
+                          isStudentVerified
+                            ? 'bg-emerald-200 text-emerald-800'
+                            : isStudentPending
+                            ? 'bg-amber-200 text-amber-800'
+                            : 'bg-zinc-200 text-zinc-600'
+                        }`}
+                      >
+                        {studentStatus.toUpperCase()}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-zinc-500 mt-0.5">
+                      {isStudentVerified
+                        ? `Verified for ${user?.institution_name || 'Academic Institution'}. Student Plan is unlocked for checkout at ₹149/mo.`
+                        : isStudentPending
+                        ? 'Your credentials are being reviewed by the automated queue. You can check status anytime.'
+                        : 'Verify your institutional .edu email or student ID card to unlock the Student Plan at 50% off.'}
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    closeSubscriptionModal();
+                    openStudentVerificationModal();
+                  }}
+                  className={`min-h-[36px] px-3.5 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1.5 shadow-xs shrink-0 ${
+                    isStudentVerified
+                      ? 'bg-emerald-700 hover:bg-emerald-800 text-white'
+                      : isStudentPending
+                      ? 'bg-amber-600 hover:bg-amber-700 text-white'
+                      : 'bg-zinc-900 hover:bg-black text-white'
+                  }`}
+                >
+                  <GraduationCap size={14} />
+                  <span>{isStudentVerified ? 'View Student Credentials' : isStudentPending ? 'Check Verification' : 'Verify Student ID'}</span>
+                </button>
+              </div>
+
               {/* Billing Cycle Toggle */}
               <div className="flex items-center justify-center">
                 <div className="p-1 bg-zinc-100 rounded-xl flex items-center border border-zinc-200/60">
@@ -108,7 +232,7 @@ export const SubscriptionView: React.FC = () => {
                         : 'text-zinc-500 hover:text-zinc-900'
                     }`}
                   >
-                    Monthly
+                    Monthly Billing
                   </button>
                   <button
                     type="button"
@@ -119,7 +243,7 @@ export const SubscriptionView: React.FC = () => {
                         : 'text-zinc-500 hover:text-zinc-900'
                     }`}
                   >
-                    <span>Annual</span>
+                    <span>Annual Billing</span>
                     <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-zinc-900 text-white">
                       Save 20%
                     </span>
@@ -127,10 +251,10 @@ export const SubscriptionView: React.FC = () => {
                 </div>
               </div>
 
-              {/* Plans Grid: Mobile Stack, PC 3-Column */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-stretch">
+              {/* Plans Grid: Responsive 4-Column Grid on Desktop, Clean Stack on Mobile */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 items-stretch">
                 {/* 1. Free Starter */}
-                <div className="bg-white rounded-2xl p-5 border border-zinc-200/80 flex flex-col justify-between">
+                <div className="bg-white rounded-2xl p-5 border border-zinc-200/80 flex flex-col justify-between hover:border-zinc-300 transition-colors">
                   <div>
                     <div className="flex items-center justify-between">
                       <h3 className="text-base font-bold text-zinc-900">Starter</h3>
@@ -163,11 +287,11 @@ export const SubscriptionView: React.FC = () => {
                       </li>
                       <li className="flex items-start gap-2">
                         <Check size={14} className="text-zinc-900 shrink-0 mt-0.5" />
-                        <span>500 MB local device cache</span>
+                        <span>500 MB local cache</span>
                       </li>
                       <li className="flex items-start gap-2">
                         <Check size={14} className="text-zinc-900 shrink-0 mt-0.5" />
-                        <span>Community support</span>
+                        <span>Standard community web support</span>
                       </li>
                     </ul>
                   </div>
@@ -188,12 +312,149 @@ export const SubscriptionView: React.FC = () => {
                   </div>
                 </div>
 
-                {/* 2. FEATURED BASE TIER (Center & Prominently Elevated) */}
-                <div className="relative bg-white rounded-2xl p-5 border-2 border-zinc-900 shadow-sm flex flex-col justify-between order-first sm:order-none">
+                {/* 2. NEW STUDENT PLAN TIER (Discounted & Exclusively Gated) */}
+                <div
+                  className={`relative rounded-2xl p-5 border-2 flex flex-col justify-between transition-all ${
+                    isStudentVerified
+                      ? 'bg-emerald-50/20 border-emerald-500 shadow-sm'
+                      : 'bg-white border-emerald-500/50 hover:border-emerald-600'
+                  }`}
+                >
+                  {/* Student Tag */}
+                  <div className="absolute -top-3 left-4">
+                    <span className="px-2.5 py-0.5 rounded-md bg-emerald-700 text-white text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 shadow-xs">
+                      <GraduationCap size={12} />
+                      <span>50% Student Discount</span>
+                    </span>
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between pt-1">
+                      <h3 className="text-base font-bold text-zinc-900 flex items-center gap-1.5">
+                        <span>Student Plan</span>
+                        {isStudentVerified && (
+                          <span title="Student Status Verified" className="inline-flex">
+                            <CheckCircle2 size={15} className="text-emerald-600 shrink-0" />
+                          </span>
+                        )}
+                      </h3>
+                      {currentTier === 'student' && (
+                        <span className="text-[10px] font-semibold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded">
+                          Active Plan
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-zinc-500 mt-1 leading-normal">
+                      For active college students & researchers.
+                    </p>
+
+                    <div className="my-4">
+                      <div className="flex items-baseline gap-1">
+                        <span className="text-3xl font-extrabold tracking-tight text-emerald-700">
+                          ₹{getPrice('student')}
+                        </span>
+                        <span className="text-xs text-zinc-400">/ mo</span>
+                        <span className="text-xs text-zinc-400 line-through ml-1.5 font-medium">₹499</span>
+                      </div>
+                      <span className="text-[11px] text-emerald-700 font-semibold block mt-0.5">
+                        {billingCycle === 'annual'
+                          ? '₹1,788 billed annually (Save ₹3,000/yr)'
+                          : 'Billed monthly · 50% discount'}
+                      </span>
+                    </div>
+
+                    {/* Verification Requirement Badge Box */}
+                    <div
+                      className={`p-2.5 rounded-xl border mb-3 text-xs flex items-start gap-2 ${
+                        isStudentVerified
+                          ? 'bg-emerald-100/60 border-emerald-300 text-emerald-900'
+                          : isStudentPending
+                          ? 'bg-amber-50 border-amber-200 text-amber-900'
+                          : 'bg-zinc-50 border-zinc-200 text-zinc-700'
+                      }`}
+                    >
+                      {isStudentVerified ? (
+                        <CheckCircle2 size={14} className="text-emerald-600 shrink-0 mt-0.5" />
+                      ) : isStudentPending ? (
+                        <Clock size={14} className="text-amber-600 shrink-0 mt-0.5" />
+                      ) : (
+                        <GraduationCap size={14} className="text-zinc-500 shrink-0 mt-0.5" />
+                      )}
+                      <div>
+                        <p className="font-bold text-[11px] leading-tight">
+                          {isStudentVerified
+                            ? 'Student Status Verified'
+                            : isStudentPending
+                            ? 'Verification In Review'
+                            : 'Academic Verification Required'}
+                        </p>
+                        <p className="text-[10px] opacity-80 mt-0.5 leading-snug">
+                          {isStudentVerified
+                            ? `${user?.institution_name || 'Academic'} credential confirmed.`
+                            : isStudentPending
+                            ? 'Verification is pending automated review.'
+                            : 'Requires active .edu email or student ID card.'}
+                        </p>
+                      </div>
+                    </div>
+
+                    <ul className="space-y-2.5 text-xs text-zinc-700 border-t border-zinc-100 pt-3">
+                      <li className="flex items-start gap-2">
+                        <Check size={14} className="text-emerald-600 shrink-0 mt-0.5" />
+                        <span>20 GB lossless cloud audio & note storage</span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <Check size={14} className="text-emerald-600 shrink-0 mt-0.5" />
+                        <span>Unlimited lecture recordings & dictation</span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <Check size={14} className="text-emerald-600 shrink-0 mt-0.5" />
+                        <span>Auto-save and real-time audio transcript</span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <Check size={14} className="text-emerald-600 shrink-0 mt-0.5" />
+                        <span>Offline study sync for classrooms & libraries</span>
+                      </li>
+                    </ul>
+                  </div>
+
+                  <div className="mt-6 pt-2">
+                    <button
+                      type="button"
+                      disabled={currentTier === 'student'}
+                      onClick={() => handleSelect('student')}
+                      className={`w-full min-h-[48px] rounded-xl text-xs font-semibold transition-all flex items-center justify-center gap-1.5 shadow-xs ${
+                        currentTier === 'student'
+                          ? 'bg-emerald-100 text-emerald-800 cursor-default'
+                          : isStudentVerified
+                          ? 'bg-emerald-700 hover:bg-emerald-800 text-white active:scale-[0.99]'
+                          : 'bg-zinc-900 hover:bg-black text-white active:scale-[0.99]'
+                      }`}
+                    >
+                      {currentTier === 'student' ? (
+                        'Current Plan'
+                      ) : isStudentVerified ? (
+                        <>
+                          <span>Select Student Plan</span>
+                          <ArrowRight size={14} />
+                        </>
+                      ) : (
+                        <>
+                          <GraduationCap size={14} />
+                          <span>Verify to Unlock ₹{getPrice('student')}</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                {/* 3. FEATURED BASE TIER (Most Popular Highlighted Card) */}
+                <div className="relative bg-white rounded-2xl p-5 border-2 border-zinc-900 shadow-md flex flex-col justify-between">
                   {/* Clean Minimal Badge */}
                   <div className="absolute -top-3 left-4">
-                    <span className="px-2.5 py-0.5 rounded-md bg-zinc-900 text-white text-[10px] font-bold uppercase tracking-wider">
-                      Featured Base · Most Popular
+                    <span className="px-2.5 py-0.5 rounded-md bg-zinc-900 text-white text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">
+                      <Sparkles size={11} className="text-amber-300" />
+                      <span>Featured Base · Most Popular</span>
                     </span>
                   </div>
 
@@ -274,8 +535,8 @@ export const SubscriptionView: React.FC = () => {
                   </div>
                 </div>
 
-                {/* 3. Pro Studio */}
-                <div className="bg-white rounded-2xl p-5 border border-zinc-200/80 flex flex-col justify-between">
+                {/* 4. Pro Studio */}
+                <div className="bg-white rounded-2xl p-5 border border-zinc-200/80 flex flex-col justify-between hover:border-zinc-300 transition-colors">
                   <div>
                     <div className="flex items-center justify-between">
                       <h3 className="text-base font-bold text-zinc-900">Pro Studio</h3>
@@ -286,7 +547,7 @@ export const SubscriptionView: React.FC = () => {
                       )}
                     </div>
                     <p className="text-xs text-zinc-500 mt-1 leading-normal">
-                      For teams and intensive research ideation.
+                      For teams and intensive research squads.
                     </p>
 
                     <div className="my-4">
@@ -347,9 +608,15 @@ export const SubscriptionView: React.FC = () => {
                 <div className="flex items-center justify-between pb-3 border-b border-zinc-200/60">
                   <div>
                     <p className="text-xs font-medium text-zinc-400">Plan</p>
-                    <p className="text-base font-bold text-zinc-900 mt-0.5">
-                      {selectedTier === 'base' ? 'Featured Base Tier' : 'Pro Studio Tier'}
+                    <p className="text-base font-bold text-zinc-900 mt-0.5 flex items-center gap-1.5">
+                      {selectedTier === 'student' && <GraduationCap size={16} className="text-emerald-600" />}
+                      <span>{getPlanName(selectedTier)}</span>
                     </p>
+                    {selectedTier === 'student' && (
+                      <span className="inline-block mt-0.5 text-[10px] font-semibold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded">
+                        50% Student Discount Verified
+                      </span>
+                    )}
                   </div>
                   <div className="text-right">
                     <p className="text-xs font-medium text-zinc-400">Amount</p>
@@ -405,7 +672,7 @@ export const SubscriptionView: React.FC = () => {
                       className="w-full min-h-[48px] px-3.5 rounded-xl border border-zinc-200 text-xs font-medium text-zinc-900 outline-none focus:border-zinc-900"
                     />
                     <p className="text-[11px] text-zinc-400 mt-1.5">
-                      Compatible with GPay, PhonePe, Paytm, and BHIM
+                      Compatible with GPay, PhonePe, Paytm, BHIM & NetBanking
                     </p>
                   </div>
                 ) : (
@@ -462,16 +729,22 @@ export const SubscriptionView: React.FC = () => {
           {/* Success Confirmation */}
           {checkoutStep === 'success' && selectedTier && (
             <div className="max-w-md mx-auto py-8 text-center space-y-4">
-              <div className="w-14 h-14 rounded-full bg-zinc-100 text-zinc-900 flex items-center justify-center mx-auto">
+              <div className="w-14 h-14 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto border border-emerald-200">
                 <CheckCircle2 size={32} />
               </div>
 
               <div>
                 <h3 className="text-xl font-bold tracking-tight text-zinc-900">
-                  {selectedTier === 'base' ? 'Featured Base' : 'Pro Studio'} Activated
+                  {selectedTier === 'student'
+                    ? 'Student Plan Activated!'
+                    : selectedTier === 'base'
+                    ? 'Featured Base Activated!'
+                    : 'Pro Studio Activated!'}
                 </h3>
                 <p className="text-xs text-zinc-500 mt-1 max-w-xs mx-auto leading-relaxed">
-                  Your workspace is updated. 15 GB storage and unlimited voice dictation are now unlocked.
+                  {selectedTier === 'student'
+                    ? `Your student discount has been applied for ${user?.institution_name || 'your institution'}. Enjoy 20 GB storage and unlimited voice dictation.`
+                    : 'Your workspace is updated. High-capacity cloud storage and unlimited voice dictation are unlocked.'}
                 </p>
               </div>
 
