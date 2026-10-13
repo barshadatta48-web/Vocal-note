@@ -2,9 +2,16 @@ import React from 'react';
 import { motion } from 'motion/react';
 import { LogOut, X } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { useAppRouter } from '../../context/RouterContext';
 
 export const LogoutConfirmModal: React.FC = () => {
   const { isLogoutModalOpen, closeLogoutModal, confirmLogout, user } = useAuth();
+  const { resetRouteToLogin } = useAppRouter();
+
+  const handleConfirm = () => {
+    confirmLogout();
+    resetRouteToLogin();
+  };
 
   if (!isLogoutModalOpen) return null;
 
@@ -56,7 +63,7 @@ export const LogoutConfirmModal: React.FC = () => {
 
           <button
             type="button"
-            onClick={confirmLogout}
+            onClick={handleConfirm}
             className="flex-1 min-h-[48px] px-4 rounded-xl bg-zinc-100 hover:bg-rose-50 text-rose-600 border border-zinc-200 hover:border-rose-200 text-xs font-semibold transition-colors flex items-center justify-center gap-1.5"
           >
             <LogOut size={14} />

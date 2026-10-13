@@ -4,6 +4,7 @@ import App from './App.tsx';
 import './index.css';
 import { registerPWA } from './pwa';
 import { ErrorBoundary } from './ErrorBoundary';
+import { RouterProvider } from './context/RouterContext';
 import { AuthProvider } from './context/AuthContext';
 
 console.log('[Bootstrap] Initializing Vocal Note application...');
@@ -15,9 +16,11 @@ if (rootElement) {
     createRoot(rootElement).render(
       <StrictMode>
         <ErrorBoundary>
-          <AuthProvider>
-            <App />
-          </AuthProvider>
+          <RouterProvider>
+            <AuthProvider>
+              <App />
+            </AuthProvider>
+          </RouterProvider>
         </ErrorBoundary>
       </StrictMode>,
     );

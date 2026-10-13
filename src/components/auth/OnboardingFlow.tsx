@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Check, ArrowRight, ArrowLeft, Mic, FileText, Palette, Compass, Users } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { useAppRouter } from '../../context/RouterContext';
 import { OnboardingData } from '../../types/auth';
 
 const ROLES = [
@@ -56,6 +57,7 @@ const THEMES = [
 
 export const OnboardingFlow: React.FC = () => {
   const { user, completeOnboarding } = useAuth();
+  const { navigate } = useAppRouter();
 
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [name, setName] = useState(user?.name || 'Barsha Datta');
@@ -76,6 +78,7 @@ export const OnboardingFlow: React.FC = () => {
       themePreference,
     };
     completeOnboarding(data);
+    navigate('/dashboard');
   };
 
   const handleNext = () => {

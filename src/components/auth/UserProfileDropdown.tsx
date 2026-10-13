@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { User, LogOut, ChevronDown, Settings, X, CreditCard, Sparkles } from 'lucide-react';
+import { User, LogOut, ChevronDown, Settings, X, CreditCard, Sparkles, AlertTriangle } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
 export const UserProfileDropdown: React.FC = () => {
@@ -9,6 +9,7 @@ export const UserProfileDropdown: React.FC = () => {
     openSubscriptionModal,
     openLogoutModal,
     restartOnboarding,
+    expireSession,
     isProfileDrawerOpen,
     openProfileDrawer,
     closeProfileDrawer,
@@ -160,6 +161,20 @@ export const UserProfileDropdown: React.FC = () => {
 
               <div className="h-px bg-zinc-100 my-1" />
 
+              {/* Edge Case Test: Simulate 401 Expiry */}
+              <button
+                type="button"
+                onClick={() => {
+                  setIsOpen(false);
+                  expireSession('Session expired (401 Unauthorized test). Please log in again.');
+                }}
+                className="w-full min-h-[38px] px-3 rounded-lg text-[11px] font-medium text-amber-700 hover:bg-amber-50 transition-colors flex items-center gap-2 text-left"
+                title="Test 401/403 session expiration and redirect guard"
+              >
+                <AlertTriangle size={13} className="text-amber-500" />
+                <span>Simulate 401 Expiry</span>
+              </button>
+
               <button
                 type="button"
                 onClick={() => {
@@ -261,6 +276,21 @@ export const UserProfileDropdown: React.FC = () => {
                   >
                     <span>Revisit Onboarding Wizard</span>
                     <span className="text-zinc-400">›</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      closeProfileDrawer();
+                      expireSession('Session expired (401 Unauthorized test). Please log in again.');
+                    }}
+                    className="w-full min-h-[48px] px-4 rounded-xl text-xs font-medium text-amber-800 bg-amber-50/50 hover:bg-amber-50 border border-amber-200/80 flex items-center justify-between transition-colors"
+                  >
+                    <div className="flex items-center gap-2">
+                      <AlertTriangle size={15} className="text-amber-600" />
+                      <span>Test 401 Session Expiry</span>
+                    </div>
+                    <span className="text-amber-500 text-xs">Simulate</span>
                   </button>
                 </div>
 

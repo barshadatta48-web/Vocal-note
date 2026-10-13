@@ -1,19 +1,36 @@
-import React, { useState } from 'react';
-import { Eye, EyeOff, Mail, Lock, ArrowRight, ShieldCheck, Check } from 'lucide-react';
-import { motion } from 'motion/react';
+import React, { useState, useEffect } from 'react';
+import { Eye, EyeOff, Mail, Lock, ArrowRight, ShieldCheck, Check, AlertCircle, X, Info } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from '../../context/AuthContext';
+import { useAppRouter } from '../../context/RouterContext';
 
-export const AuthScreen: React.FC = () => {
-  const { login, signup, socialLogin } = useAuth();
+export interface AuthScreenProps {
+  initialMode?: 'login' | 'signup';
+}
 
-  const [mode, setMode] = useState<'login' | 'signup'>('login');
+export const AuthScreen: React.FC<AuthScreenProps> = ({ initialMode = 'login' }) => {
+  const { login, signup, socialLogin, notification, clearNotification } = useAuth();
+  const { navigate } = useAppRouter();
+
+  const [mode, setMode] = useState<'login' | 'signup'>(initialMode);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
-  const [errors, setErrors] = useState<{ name?: string; email?: string; password?: string }>({});
+  const [errors, setErrors] = useState<{ name?: string; email?: string; password?: string; general?: string }>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Sync mode if initialMode prop changes from router
+  useEffect(() => {
+    setMode(initialMode);
+  }, [initialMode]);
+
+  const switchMode = (newMode: 'login' | 'signup') => {
+    setMode(newMode);
+    setErrors({});
+    navigate(newMode === 'signup' ? '/signup' : '/login');
+  };
 
   const validate = (): boolean => {
     const nextErrors: { name?: string; email?: string; password?: string } = {};
@@ -43,12 +60,19 @@ export const AuthScreen: React.FC = () => {
     if (!validate()) return;
 
     setIsSubmitting(true);
+    setErrors({});
     try {
       if (mode === 'login') {
+        // Sequential handshake: user credentials verified & session stored atomically
         await login(email, password, rememberMe);
       } else {
+        // Brand-new registration handshake: stores session & forces mandatory onboarding
         await signup(name, email, password);
       }
+    } catch (err: any) {
+      setErrors({
+        general: err?.message || 'Authentication failed. Please check your credentials.',
+      });
     } finally {
       setIsSubmitting(false);
     }
@@ -56,8 +80,11 @@ export const AuthScreen: React.FC = () => {
 
   const handleDemoSignIn = async () => {
     setIsSubmitting(true);
+    setErrors({});
     try {
       await login('dattabarsha9@gmail.com', 'demoPass123', true);
+    } catch (err: any) {
+      setErrors({ general: err?.message || 'Demo access failed.' });
     } finally {
       setIsSubmitting(false);
     }
@@ -65,8 +92,11 @@ export const AuthScreen: React.FC = () => {
 
   const handleSocial = async (provider: 'google' | 'github') => {
     setIsSubmitting(true);
+    setErrors({});
     try {
       await socialLogin(provider);
+    } catch (err: any) {
+      setErrors({ general: err?.message || 'Social authentication failed.' });
     } finally {
       setIsSubmitting(false);
     }
@@ -106,6 +136,43 @@ export const AuthScreen: React.FC = () => {
           transition={{ duration: 0.25, ease: 'easeOut' }}
           className="bg-white sm:rounded-3xl border border-zinc-200/70 sm:shadow-xs p-6 sm:p-9 rounded-2xl"
         >
+          {/* Notification Banner for Session Expiry / 401 Alerts */}
+          <AnimatePresence>
+            {notification && (
+              <motion.div
+                initial={{ opacity: 0, height: 0, marginBottom: 0 }}
+                animate={{ opacity: 1, height: 'auto', marginBottom: 16 }}
+                exit={{ opacity: 0, height: 0, marginBottom: 0 }}
+                className={`p-3.5 rounded-xl border text-xs flex items-start justify-between gap-2.5 ${
+                  notification.type === 'warning' || notification.type === 'error'
+                    ? 'bg-amber-50/80 border-amber-200 text-amber-900'
+                    : 'bg-zinc-100 border-zinc-200 text-zinc-800'
+                }`}
+              >
+                <div className="flex items-start gap-2">
+                  <AlertCircle size={15} className="mt-0.5 shrink-0 text-amber-600" />
+                  <p className="font-medium leading-relaxed">{notification.message}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={clearNotification}
+                  className="text-zinc-400 hover:text-zinc-700 p-0.5 rounded-md transition-colors"
+                  aria-label="Dismiss notice"
+                >
+                  <X size={14} />
+                </button>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* General Submission Error Banner */}
+          {errors.general && (
+            <div className="mb-4 p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-700 flex items-center gap-2">
+              <AlertCircle size={14} className="shrink-0" />
+              <span>{errors.general}</span>
+            </div>
+          )}
+
           {/* Header Typography */}
           <div className="mb-6">
             <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-zinc-900">
@@ -122,10 +189,7 @@ export const AuthScreen: React.FC = () => {
           <div className="p-1 bg-zinc-100 rounded-xl mb-6 flex items-center border border-zinc-200/50">
             <button
               type="button"
-              onClick={() => {
-                setMode('login');
-                setErrors({});
-              }}
+              onClick={() => switchMode('login')}
               className={`flex-1 min-h-[44px] text-xs font-semibold rounded-lg transition-all flex items-center justify-center ${
                 mode === 'login'
                   ? 'bg-white text-zinc-900 shadow-xs'
@@ -136,10 +200,7 @@ export const AuthScreen: React.FC = () => {
             </button>
             <button
               type="button"
-              onClick={() => {
-                setMode('signup');
-                setErrors({});
-              }}
+              onClick={() => switchMode('signup')}
               className={`flex-1 min-h-[44px] text-xs font-semibold rounded-lg transition-all flex items-center justify-center ${
                 mode === 'signup'
                   ? 'bg-white text-zinc-900 shadow-xs'
@@ -223,53 +284,48 @@ export const AuthScreen: React.FC = () => {
 
             <div>
               <label className="block text-xs font-semibold text-zinc-700 mb-1.5">
-                Email
+                Email Address
               </label>
-              <div className="relative flex items-center">
+              <div className="relative">
                 <input
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@domain.com"
-                  autoComplete="email"
-                  className={`w-full min-h-[48px] px-3.5 rounded-xl bg-white border ${
+                  placeholder="name@example.com"
+                  className={`w-full min-h-[48px] pl-3.5 pr-10 rounded-xl bg-white border ${
                     errors.email ? 'border-rose-400 focus:ring-1 focus:ring-rose-400' : 'border-zinc-200 focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900'
                   } text-sm text-zinc-900 placeholder:text-zinc-400 outline-none transition-all`}
                 />
+                <Mail size={16} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" />
               </div>
               {errors.email && <p className="text-[11px] text-rose-500 mt-1 font-medium">{errors.email}</p>}
             </div>
 
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <label className="block text-xs font-semibold text-zinc-700">
+                <label className="text-xs font-semibold text-zinc-700">
                   Password
                 </label>
                 {mode === 'login' && (
-                  <button
-                    type="button"
-                    onClick={handleDemoSignIn}
-                    className="text-[11px] font-medium text-zinc-500 hover:text-zinc-900 transition-colors"
-                  >
+                  <span className="text-[11px] text-zinc-400 hover:text-zinc-700 cursor-pointer transition-colors">
                     Forgot password?
-                  </button>
+                  </span>
                 )}
               </div>
-              <div className="relative flex items-center">
+              <div className="relative">
                 <input
                   type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
-                  autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-                  className={`w-full min-h-[48px] pl-3.5 pr-12 rounded-xl bg-white border ${
+                  className={`w-full min-h-[48px] pl-3.5 pr-10 rounded-xl bg-white border ${
                     errors.password ? 'border-rose-400 focus:ring-1 focus:ring-rose-400' : 'border-zinc-200 focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900'
                   } text-sm text-zinc-900 placeholder:text-zinc-400 outline-none transition-all`}
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-1 w-10 h-10 flex items-center justify-center text-zinc-400 hover:text-zinc-700 transition-colors"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-700 p-1 min-w-[32px] min-h-[32px] flex items-center justify-center transition-colors"
                   aria-label={showPassword ? 'Hide password' : 'Show password'}
                 >
                   {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
@@ -279,24 +335,29 @@ export const AuthScreen: React.FC = () => {
             </div>
 
             {/* Remember Me Toggle */}
-            <div className="pt-1 flex items-center">
-              <label className="flex items-center gap-2.5 cursor-pointer select-none">
+            <div className="pt-1 flex items-center justify-between">
+              <label className="flex items-center gap-2 cursor-pointer select-none">
                 <input
                   type="checkbox"
                   checked={rememberMe}
                   onChange={(e) => setRememberMe(e.target.checked)}
-                  className="w-4 h-4 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-900 cursor-pointer"
+                  className="w-4 h-4 rounded text-zinc-900 focus:ring-0 border-zinc-300 accent-zinc-900"
                 />
                 <span className="text-xs text-zinc-600 font-medium">Keep me signed in</span>
               </label>
+
+              <div className="flex items-center gap-1 text-[11px] text-zinc-400">
+                <ShieldCheck size={13} className="text-emerald-500" />
+                <span>256-bit encrypted</span>
+              </div>
             </div>
 
-            {/* Primary Action Button (Sticky/Anchor Friendly) */}
+            {/* Sticky / Full-width Primary Action Button (>= 48px touch target) */}
             <div className="pt-2">
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className="w-full min-h-[48px] px-5 py-3 bg-zinc-900 hover:bg-black text-white rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2 active:scale-[0.99] disabled:opacity-70 shadow-xs"
+                className="w-full min-h-[48px] px-4 bg-zinc-900 hover:bg-zinc-800 active:scale-[0.99] text-white rounded-xl text-xs sm:text-sm font-semibold transition-all shadow-xs flex items-center justify-center gap-2 disabled:opacity-50"
               >
                 {isSubmitting ? (
                   <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
@@ -317,10 +378,7 @@ export const AuthScreen: React.FC = () => {
                 New to Vocal Note?{' '}
                 <button
                   type="button"
-                  onClick={() => {
-                    setMode('signup');
-                    setErrors({});
-                  }}
+                  onClick={() => switchMode('signup')}
                   className="font-semibold text-zinc-900 hover:underline ml-0.5"
                 >
                   Create an account
@@ -331,10 +389,7 @@ export const AuthScreen: React.FC = () => {
                 Already registered?{' '}
                 <button
                   type="button"
-                  onClick={() => {
-                    setMode('login');
-                    setErrors({});
-                  }}
+                  onClick={() => switchMode('login')}
                   className="font-semibold text-zinc-900 hover:underline ml-0.5"
                 >
                   Sign in
