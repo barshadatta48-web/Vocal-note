@@ -380,7 +380,7 @@ function isCaretAtStartOfNode(container: Node, offset: number, rootNode: Node): 
 }
 
 function NotesApp() {
-  const { user } = useAuth();
+  const { user, triggerGatedFeature, openSubscriptionModal } = useAuth();
   const [notes, setNotes] = useState<Note[]>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [viewMode, setViewMode] = useState<'grid' | 'board'>('grid');
@@ -1078,6 +1078,7 @@ function NotesApp() {
   };
 
   const exportData = () => {
+    if (!triggerGatedFeature('Workspace Backup & Export')) return;
     const data = JSON.stringify({ notes, templates });
     const blob = new Blob([data], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -1088,6 +1089,7 @@ function NotesApp() {
   };
 
   const importData = () => {
+    if (!triggerGatedFeature('Cloud Backup & Restore')) return;
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = '.json';
@@ -1423,6 +1425,7 @@ function NotesApp() {
   };
 
   const generateAIContent = async (type: 'note' | 'template' = 'note') => {
+    if (!triggerGatedFeature('AI Smart Template Generation')) return;
     setIsLoading(true);
     try {
       const prompt = type === 'template' 

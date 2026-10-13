@@ -8,6 +8,8 @@ import {
   AuthStatus,
   AuthNotification,
   StudentVerificationStatus,
+  DraftProfile,
+  SequentialFlowStep,
 } from '../types/auth';
 
 interface AuthContextType {
@@ -41,6 +43,18 @@ interface AuthContextType {
   openProfileDrawer: () => void;
   closeProfileDrawer: () => void;
   restartOnboarding: () => void;
+  // Sequential 5-step user journey
+  hasCompletedSplash: boolean;
+  completeSplashScreen: () => void;
+  restartSplashScreen: () => void;
+  hasCompletedProfileSetup: boolean;
+  draftProfile: DraftProfile | null;
+  saveDraftProfile: (draft: DraftProfile) => void;
+  skipToAuth: () => void;
+  // Step 5: Gated features context
+  gatedFeatureContext: string | null;
+  triggerGatedFeature: (featureName: string) => boolean;
+  clearGatedFeatureContext: () => void;
   // Student verification actions
   verifyStudentEmail: (studentEmail: string, institution: string) => Promise<{ success: boolean; message: string; requiresOtp?: boolean; generatedOtp?: string }>;
   submitStudentOtp: (otp: string) => Promise<{ success: boolean; message: string }>;
@@ -56,6 +70,9 @@ export const STORAGE_KEY_USER = 'vocalnote_auth_user';
 export const STORAGE_KEY_ONBOARDED = 'vocalnote_auth_onboarded';
 export const STORAGE_KEY_REMEMBER = 'vocalnote_remember_me';
 export const STORAGE_KEY_NOTIFICATION = 'vocalnote_auth_notification';
+export const STORAGE_KEY_SPLASH_SEEN = 'vocalnote_splash_seen';
+export const STORAGE_KEY_PROFILE_DONE = 'vocalnote_profile_setup_done';
+export const STORAGE_KEY_DRAFT_PROFILE = 'vocalnote_draft_profile';
 
 const DEFAULT_DEMO_USER: UserProfile = {
   id: 'usr_demo_101',
@@ -98,6 +115,38 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Pending student verification state
   const [pendingStudentOtp, setPendingStudentOtp] = useState<string | null>(null);
   const [pendingStudentDetails, setPendingStudentDetails] = useState<{ email: string; institution: string } | null>(null);
+
+  // Step 1: Splash screen completion state (starts false on initial app launch)
+  const [hasCompletedSplash, setHasCompletedSplash] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return sessionStorage.getItem(STORAGE_KEY_SPLASH_SEEN) === 'true';
+    }
+    return false;
+  });
+
+  // Step 2: Profile creation completion state for new users
+  const [hasCompletedProfileSetup, setHasCompletedProfileSetup] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem(STORAGE_KEY_PROFILE_DONE) === 'true';
+    }
+    return false;
+  });
+
+  // Draft profile created during Step 2 before credentials submission
+  const [draftProfile, setDraftProfile] = useState<DraftProfile | null>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem(STORAGE_KEY_DRAFT_PROFILE);
+        return stored ? JSON.parse(stored) : null;
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  });
+
+  // Step 5: Gated feature context
+  const [gatedFeatureContext, setGatedFeatureContext] = useState<string | null>(null);
 
   /**
    * REHYDRATION LIFECYCLE:
@@ -289,6 +338,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       localStorage.setItem(STORAGE_KEY_SESSION, JSON.stringify(newSession));
       localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(profile));
       localStorage.setItem(STORAGE_KEY_ONBOARDED, 'true');
+      localStorage.setItem(STORAGE_KEY_PROFILE_DONE, 'true');
       if (rememberMe) {
         localStorage.setItem(STORAGE_KEY_REMEMBER, 'true');
       } else {
@@ -298,6 +348,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.error('[Auth] Failed to write session to localStorage:', e);
     }
 
+    setHasCompletedProfileSetup(true);
     setUser(profile);
     setSession(newSession);
     setIsOnboarded(true);
@@ -312,25 +363,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const token = `vocal_sess_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
     const expiresAt = Date.now() + 24 * 60 * 60 * 1000;
     const cleanEmail = email.trim().toLowerCase();
-    const cleanName = name.trim() || 'New Creator';
+    const cleanName = name.trim() || draftProfile?.name || 'New Creator';
 
     const isStudentEmail = /@(.*\.)?(edu|ac\.in|edu\.in|ac\.uk|edu\.au|edu\.sg|school|uni)/i.test(cleanEmail);
+
+    const userAvatar = draftProfile?.avatar || `https://api.dicebear.com/7.x/notionists/svg?seed=${encodeURIComponent(cleanName)}&backgroundColor=e2e8f0`;
+    const userRole = draftProfile?.role || (isStudentEmail ? 'Student / Scholar' : 'Member');
+    const userUseCase = draftProfile?.useCase || 'Voice Ideation';
+    const userTheme = draftProfile?.themePreference || 'Warm Paper';
+    const isStudent = Boolean(draftProfile?.isStudent || isStudentEmail);
 
     const newUser: UserProfile = {
       id: `usr_${Date.now()}`,
       name: cleanName,
       email: cleanEmail,
-      role: isStudentEmail ? 'Student / Scholar' : 'Member',
-      avatar: `https://api.dicebear.com/7.x/notionists/svg?seed=${encodeURIComponent(cleanName)}&backgroundColor=e2e8f0`,
+      role: userRole,
+      avatar: userAvatar,
+      useCase: userUseCase,
+      themePreference: userTheme,
       subscriptionTier: 'free',
       subscription_plan: 'free',
       billingCycle: 'monthly',
       sessionToken: token,
-      isFirstLogin: true,
+      isFirstLogin: false,
       createdAt: new Date().toISOString(),
-      is_student: isStudentEmail,
-      student_verification_status: 'none',
-      institution_name: isStudentEmail ? cleanEmail.split('@')[1] : '',
+      is_student: isStudent,
+      student_verification_status: isStudent ? 'verified' : 'none',
+      institution_name: isStudentEmail ? cleanEmail.split('@')[1] : (draftProfile?.role?.includes('Student') ? 'Academic Institution' : ''),
       student_email: isStudentEmail ? cleanEmail : undefined,
     };
 
@@ -346,14 +405,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       localStorage.setItem(STORAGE_KEY_TOKEN, token);
       localStorage.setItem(STORAGE_KEY_SESSION, JSON.stringify(newSession));
       localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(newUser));
-      localStorage.setItem(STORAGE_KEY_ONBOARDED, 'false');
+      localStorage.setItem(STORAGE_KEY_ONBOARDED, 'true');
+      localStorage.setItem(STORAGE_KEY_PROFILE_DONE, 'true');
     } catch (e) {
       console.error('[Auth] Failed to write session to localStorage:', e);
     }
 
+    setHasCompletedProfileSetup(true);
     setUser(newUser);
     setSession(newSession);
-    setIsOnboarded(false);
+    setIsOnboarded(true);
     setAuthStatus('authenticated');
     setNotification(null);
     return true;
@@ -729,6 +790,73 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setIsProfileDrawerOpen(false);
   };
 
+  // Step 1: Splash screen completion actions
+  const completeSplashScreen = useCallback(() => {
+    setHasCompletedSplash(true);
+    if (typeof window !== 'undefined') {
+      try {
+        sessionStorage.setItem(STORAGE_KEY_SPLASH_SEEN, 'true');
+      } catch (e) {
+        console.warn('Failed to set splash seen:', e);
+      }
+    }
+  }, []);
+
+  const restartSplashScreen = useCallback(() => {
+    setHasCompletedSplash(false);
+    if (typeof window !== 'undefined') {
+      try {
+        sessionStorage.removeItem(STORAGE_KEY_SPLASH_SEEN);
+      } catch (e) {
+        console.warn('Failed to reset splash:', e);
+      }
+    }
+  }, []);
+
+  // Step 2: Profile creation actions
+  const saveDraftProfile = useCallback((draft: DraftProfile) => {
+    setDraftProfile(draft);
+    setHasCompletedProfileSetup(true);
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem(STORAGE_KEY_DRAFT_PROFILE, JSON.stringify(draft));
+        localStorage.setItem(STORAGE_KEY_PROFILE_DONE, 'true');
+      } catch (e) {
+        console.warn('Failed to persist draft profile:', e);
+      }
+    }
+  }, []);
+
+  const skipToAuth = useCallback(() => {
+    setHasCompletedProfileSetup(true);
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem(STORAGE_KEY_PROFILE_DONE, 'true');
+      } catch (e) {
+        console.warn('Failed to set profile done:', e);
+      }
+    }
+  }, []);
+
+  // Step 5: Gated features handler
+  const triggerGatedFeature = useCallback((featureName: string): boolean => {
+    const isPaid = user?.subscriptionTier && user.subscriptionTier !== 'free';
+    if (!isPaid) {
+      setGatedFeatureContext(featureName);
+      setNotification({
+        type: 'info',
+        message: `"${featureName}" is a premium feature. Please upgrade or activate the verified Student Plan.`,
+      });
+      setIsSubscriptionModalOpen(true);
+      return false;
+    }
+    return true;
+  }, [user]);
+
+  const clearGatedFeatureContext = useCallback(() => {
+    setGatedFeatureContext(null);
+  }, []);
+
   return (
     <AuthContext.Provider
       value={{
@@ -762,6 +890,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         openProfileDrawer,
         closeProfileDrawer,
         restartOnboarding,
+        hasCompletedSplash,
+        completeSplashScreen,
+        restartSplashScreen,
+        hasCompletedProfileSetup,
+        draftProfile,
+        saveDraftProfile,
+        skipToAuth,
+        gatedFeatureContext,
+        triggerGatedFeature,
+        clearGatedFeatureContext,
         verifyStudentEmail,
         submitStudentOtp,
         submitStudentDocument,

@@ -2,6 +2,8 @@ import React, { useEffect } from 'react';
 import { motion } from 'motion/react';
 import { useAuth } from '../../context/AuthContext';
 import { useAppRouter } from '../../context/RouterContext';
+import { SplashScreen } from './SplashScreen';
+import { ProfileCreationStep } from './ProfileCreationStep';
 import { AuthScreen } from './AuthScreen';
 import { OnboardingFlow } from './OnboardingFlow';
 
@@ -34,7 +36,7 @@ export const AuthSkeleton: React.FC = () => {
           Vocal Note
         </h2>
         <p className="text-xs text-zinc-400 mt-1 mb-5">
-          Verifying authentication session...
+          Verifying secure workspace session...
         </p>
 
         {/* Hairline Progress Indicator */}
@@ -61,81 +63,90 @@ export interface AuthGuardProps {
 
 /**
  * State-Driven Routing Guard (AuthGuard)
- * Strictly enforces sequential lifecycle:
- * Registration / First Login -> Initial State Setup -> Authentication Session Verification -> Protected Access
+ * Strictly enforces the 5-step sequential user journey:
+ * 1. Splash Screen & User Welcome
+ * 2. Profile Creation State (for new users)
+ * 3. Sign Up / Sign In Handshake
+ * 4. Main Workspace / Dashboard
+ * 5. Paid Feature & Subscription Gating
  */
 export const AuthGuard: React.FC<AuthGuardProps> = ({ children }) => {
-  const { isRehydrating, isAuthenticated, isOnboarded, user, session } = useAuth();
+  const {
+    isRehydrating,
+    isAuthenticated,
+    isOnboarded,
+    user,
+    session,
+    hasCompletedSplash,
+    completeSplashScreen,
+    hasCompletedProfileSetup,
+    draftProfile,
+    saveDraftProfile,
+    skipToAuth,
+  } = useAuth();
+
   const { currentPath, navigate, isPublicRoute } = useAppRouter();
 
-  // 1. REHYDRATION CHECK:
-  // While rehydrating session from storage, halt navigation checks to prevent UI flicker
   const hasValidSession = isAuthenticated && !!user && !!session && !isRehydrating;
 
-  // 2. STATE-DRIVEN REDIRECT CHECKS:
+  // Sync browser path with sequential state
   useEffect(() => {
-    if (isRehydrating) return;
+    if (isRehydrating || !hasCompletedSplash) return;
 
     const isPublic = isPublicRoute(currentPath);
 
-    // CASE A: User is unauthenticated and attempting to access a protected route
-    if (!hasValidSession && !isPublic) {
-      if (currentPath !== '/login') {
-        console.log(`[AuthGuard] Intercepting unauthorized route "${currentPath}" -> Redirecting to /login`);
+    // If unauthenticated: ensure path points to login/signup
+    if (!hasValidSession) {
+      if (!isPublic && currentPath !== '/login' && currentPath !== '/signup') {
         navigate('/login', { replace: true });
       }
       return;
     }
 
-    // CASE B: User is authenticated but is a FIRST-TIME / UN-ONBOARDED user
-    if (hasValidSession && !isOnboarded) {
-      if (currentPath !== '/onboarding') {
-        console.log(`[AuthGuard] Intercepting un-onboarded user at "${currentPath}" -> Redirecting to /onboarding`);
-        navigate('/onboarding', { replace: true });
-      }
-      return;
-    }
-
-    // CASE C: User is fully authenticated & onboarded but on a public route (e.g. /login, /signup, /landing)
-    if (hasValidSession && isOnboarded && isPublic) {
+    // If authenticated: ensure path points to dashboard if previously on login/signup
+    if (hasValidSession && isPublic) {
       if (currentPath !== '/dashboard' && currentPath !== '/') {
-        console.log(`[AuthGuard] Authenticated user on public path "${currentPath}" -> Redirecting to /dashboard`);
         navigate('/dashboard', { replace: true });
       }
-      return;
     }
+  }, [isRehydrating, hasCompletedSplash, hasValidSession, currentPath, isPublicRoute, navigate]);
 
-    // CASE D: User is fully onboarded but visiting /onboarding
-    if (hasValidSession && isOnboarded && currentPath === '/onboarding') {
-      console.log(`[AuthGuard] Already onboarded -> Redirecting to /dashboard`);
-      navigate('/dashboard', { replace: true });
-    }
-  }, [isRehydrating, hasValidSession, isOnboarded, currentPath, isPublicRoute, navigate]);
+  // STEP 1: SPLASH SCREEN & USER WELCOME (Initial launch gate)
+  if (!hasCompletedSplash) {
+    return <SplashScreen onComplete={completeSplashScreen} />;
+  }
 
-  // RENDER LIFECYCLE 1: Session Rehydration Screen
+  // REHYDRATION LIFECYCLE: Prevents UI flicker while reading session from persistent storage
   if (isRehydrating) {
     return <AuthSkeleton />;
   }
 
-  // RENDER LIFECYCLE 2: Public Unauthenticated Views
+  // STEP 2: PROFILE CREATION STATE (For new unauthenticated users before credentials handshake)
+  if (!hasValidSession && !hasCompletedProfileSetup) {
+    return (
+      <ProfileCreationStep
+        initialData={draftProfile || undefined}
+        onComplete={saveDraftProfile}
+        onAlreadyHaveAccount={skipToAuth}
+      />
+    );
+  }
+
+  // STEP 3: SIGN UP / SIGN IN AUTHENTICATION HANDSHAKE
   if (!hasValidSession) {
-    const isSignupPath = currentPath === '/signup';
-    return <AuthScreen initialMode={isSignupPath ? 'signup' : 'login'} />;
+    const isSignup = currentPath === '/signup' || Boolean(draftProfile);
+    return (
+      <AuthScreen
+        initialMode={isSignup ? 'signup' : 'login'}
+        draftProfile={draftProfile}
+      />
+    );
   }
 
-  // RENDER LIFECYCLE 3: Mandatory First-Login Onboarding Screen
-  if (!isOnboarded || currentPath === '/onboarding') {
-    return <OnboardingFlow />;
-  }
-
-  // RENDER LIFECYCLE 4: Verified Protected Application Workspace
+  // STEP 4: MAIN WORKSPACE / DASHBOARD (+ STEP 5: PAID FEATURE GATING)
   return <>{children}</>;
 };
 
-/**
- * ProtectedRoute Component
- * Can be wrapped around specific views or layouts to enforce auth session validation.
- */
 export const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   return <AuthGuard>{children}</AuthGuard>;
 };

@@ -1,19 +1,24 @@
 import React, { useState, useEffect } from 'react';
-import { Eye, EyeOff, Mail, Lock, ArrowRight, ShieldCheck, Check, AlertCircle, X, Info } from 'lucide-react';
+import { Eye, EyeOff, Mail, Lock, ArrowRight, ShieldCheck, Check, AlertCircle, X, Info, User } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from '../../context/AuthContext';
 import { useAppRouter } from '../../context/RouterContext';
+import { DraftProfile } from '../../types/auth';
 
 export interface AuthScreenProps {
   initialMode?: 'login' | 'signup';
+  draftProfile?: DraftProfile | null;
 }
 
-export const AuthScreen: React.FC<AuthScreenProps> = ({ initialMode = 'login' }) => {
+export const AuthScreen: React.FC<AuthScreenProps> = ({
+  initialMode = 'login',
+  draftProfile,
+}) => {
   const { login, signup, socialLogin, notification, clearNotification } = useAuth();
   const { navigate } = useAppRouter();
 
   const [mode, setMode] = useState<'login' | 'signup'>(initialMode);
-  const [name, setName] = useState('');
+  const [name, setName] = useState(draftProfile?.name || '');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(true);
@@ -25,6 +30,13 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ initialMode = 'login' })
   useEffect(() => {
     setMode(initialMode);
   }, [initialMode]);
+
+  // If draftProfile updates, sync name
+  useEffect(() => {
+    if (draftProfile?.name && !name) {
+      setName(draftProfile.name);
+    }
+  }, [draftProfile, name]);
 
   const switchMode = (newMode: 'login' | 'signup') => {
     setMode(newMode);
@@ -66,25 +78,13 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ initialMode = 'login' })
         // Sequential handshake: user credentials verified & session stored atomically
         await login(email, password, rememberMe);
       } else {
-        // Brand-new registration handshake: stores session & forces mandatory onboarding
+        // Brand-new registration handshake: stores session & grants full dashboard access
         await signup(name, email, password);
       }
     } catch (err: any) {
       setErrors({
-        general: err?.message || 'Authentication failed. Please check your credentials.',
+        general: err?.message || 'Authentication failed. Please verify your credentials.',
       });
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleDemoSignIn = async () => {
-    setIsSubmitting(true);
-    setErrors({});
-    try {
-      await login('dattabarsha9@gmail.com', 'demoPass123', true);
-    } catch (err: any) {
-      setErrors({ general: err?.message || 'Demo access failed.' });
     } finally {
       setIsSubmitting(false);
     }
@@ -103,27 +103,22 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ initialMode = 'login' })
   };
 
   return (
-    <div className="min-h-screen w-full bg-zinc-50 flex flex-col justify-between text-zinc-900 font-sans antialiased selection:bg-zinc-900 selection:text-white">
-      {/* Top Minimal Navigation Bar */}
-      <header className="w-full max-w-5xl mx-auto px-4 sm:px-8 py-5 sm:py-6 flex items-center justify-between">
+    <div className="min-h-screen w-full bg-zinc-50 flex flex-col justify-between font-sans antialiased text-zinc-900 selection:bg-zinc-900 selection:text-white">
+      {/* Header Bar */}
+      <header className="w-full max-w-5xl mx-auto px-4 sm:px-8 py-4 sm:py-6 flex items-center justify-between border-b border-zinc-200/60">
         <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-xl bg-zinc-900 text-white flex items-center justify-center font-bold text-sm tracking-tight shadow-xs">
             V
           </div>
           <span className="font-semibold text-sm tracking-tight text-zinc-900">
-            Vocal Note
+            VocalNote
           </span>
         </div>
 
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={handleDemoSignIn}
-            disabled={isSubmitting}
-            className="min-h-[48px] px-4 rounded-xl text-xs font-semibold text-zinc-600 hover:text-zinc-900 hover:bg-zinc-200/50 transition-colors flex items-center gap-1.5"
-          >
-            <span>Demo Access</span>
-          </button>
+          <span className="text-[11px] font-semibold text-zinc-600 bg-zinc-100 px-2.5 py-1 rounded-full border border-zinc-200">
+            Step 3 of 5 · Authentication
+          </span>
         </div>
       </header>
 
@@ -168,73 +163,65 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ initialMode = 'login' })
           {/* General Submission Error Banner */}
           {errors.general && (
             <div className="mb-4 p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-700 flex items-center gap-2">
-              <AlertCircle size={14} className="shrink-0" />
+              <AlertCircle size={15} className="shrink-0 text-rose-500" />
               <span>{errors.general}</span>
             </div>
           )}
 
-          {/* Header Typography */}
+          {/* Draft profile indicator if user prepared profile in Step 2 */}
+          {draftProfile && mode === 'signup' && (
+            <div className="mb-5 p-3 rounded-2xl bg-zinc-50 border border-zinc-200/80 flex items-center gap-3">
+              <img
+                src={draftProfile.avatar}
+                alt={draftProfile.name}
+                className="w-10 h-10 rounded-xl object-cover ring-1 ring-zinc-200"
+              />
+              <div className="min-w-0 flex-1">
+                <div className="text-xs font-bold text-zinc-900 truncate">{draftProfile.name}</div>
+                <div className="text-[11px] text-zinc-500 truncate">{draftProfile.role}</div>
+              </div>
+              <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-md">
+                Profile Ready
+              </span>
+            </div>
+          )}
+
+          {/* Header Copy */}
           <div className="mb-6">
-            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-zinc-900">
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-zinc-900">
               {mode === 'login' ? 'Sign in to Vocal Note' : 'Create your account'}
             </h1>
-            <p className="text-xs sm:text-sm text-zinc-500 mt-1.5 leading-relaxed">
+            <p className="text-xs sm:text-sm text-zinc-500 mt-1">
               {mode === 'login'
-                ? 'Welcome back. Enter your credentials to access your notes.'
-                : 'Experience voice-first thinking with scoped audio dictation.'}
+                ? 'Enter your credentials to access your audio workspace.'
+                : 'Link your credentials to save and sync your vocal collection.'}
             </p>
           </div>
 
-          {/* Segmented Mode Selector */}
-          <div className="p-1 bg-zinc-100 rounded-xl mb-6 flex items-center border border-zinc-200/50">
-            <button
-              type="button"
-              onClick={() => switchMode('login')}
-              className={`flex-1 min-h-[44px] text-xs font-semibold rounded-lg transition-all flex items-center justify-center ${
-                mode === 'login'
-                  ? 'bg-white text-zinc-900 shadow-xs'
-                  : 'text-zinc-500 hover:text-zinc-900'
-              }`}
-            >
-              Sign In
-            </button>
-            <button
-              type="button"
-              onClick={() => switchMode('signup')}
-              className={`flex-1 min-h-[44px] text-xs font-semibold rounded-lg transition-all flex items-center justify-center ${
-                mode === 'signup'
-                  ? 'bg-white text-zinc-900 shadow-xs'
-                  : 'text-zinc-500 hover:text-zinc-900'
-              }`}
-            >
-              Create Account
-            </button>
-          </div>
-
-          {/* Social Logins */}
-          <div className="grid grid-cols-2 gap-2.5 mb-6">
+          {/* Social Auth Buttons */}
+          <div className="grid grid-cols-2 gap-3 mb-6">
             <button
               type="button"
               onClick={() => handleSocial('google')}
               disabled={isSubmitting}
-              className="min-h-[48px] px-3 bg-white hover:bg-zinc-50 border border-zinc-200/80 rounded-xl text-zinc-700 text-xs font-semibold transition-all flex items-center justify-center gap-2 active:scale-[0.98] shadow-xs"
+              className="min-h-[48px] px-3.5 rounded-xl border border-zinc-200 hover:border-zinc-300 hover:bg-zinc-50/70 text-zinc-800 text-xs font-semibold flex items-center justify-center gap-2 transition-all active:scale-[0.98] disabled:opacity-50"
             >
-              <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
+              <svg className="w-4 h-4" viewBox="0 0 24 24">
                 <path
                   fill="#4285F4"
-                  d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                  d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.8-2.4 3.66v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.15z"
                 />
                 <path
                   fill="#34A853"
-                  d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                  d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.33 24 12 24z"
                 />
                 <path
                   fill="#FBBC05"
-                  d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
+                  d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 9.99 0 12s.45 3.82 1.25 5.42l4.03-3.15z"
                 />
                 <path
                   fill="#EA4335"
-                  d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
+                  d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"
                 />
               </svg>
               <span>Google</span>
@@ -244,9 +231,9 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ initialMode = 'login' })
               type="button"
               onClick={() => handleSocial('github')}
               disabled={isSubmitting}
-              className="min-h-[48px] px-3 bg-white hover:bg-zinc-50 border border-zinc-200/80 rounded-xl text-zinc-700 text-xs font-semibold transition-all flex items-center justify-center gap-2 active:scale-[0.98] shadow-xs"
+              className="min-h-[48px] px-3.5 rounded-xl border border-zinc-200 hover:border-zinc-300 hover:bg-zinc-50/70 text-zinc-800 text-xs font-semibold flex items-center justify-center gap-2 transition-all active:scale-[0.98] disabled:opacity-50"
             >
-              <svg className="w-4 h-4 shrink-0 text-zinc-900" fill="currentColor" viewBox="0 0 24 24">
+              <svg className="w-4 h-4 fill-zinc-900" viewBox="0 0 24 24">
                 <path fillRule="evenodd" clipRule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" />
               </svg>
               <span>GitHub</span>

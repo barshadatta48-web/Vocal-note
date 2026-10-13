@@ -75,3 +75,14 @@ export interface SubscriptionPlan {
     support: string;
   };
 }
+
+export type SequentialFlowStep = 'splash' | 'profile_creation' | 'auth' | 'dashboard';
+
+export interface DraftProfile {
+  name: string;
+  avatar: string;
+  role: string;
+  useCase: string;
+  themePreference: string;
+  isStudent?: boolean;
+}

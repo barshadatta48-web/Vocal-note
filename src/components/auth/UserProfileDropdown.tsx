@@ -22,6 +22,7 @@ export const UserProfileDropdown: React.FC = () => {
     openStudentVerificationModal,
     openLogoutModal,
     restartOnboarding,
+    restartSplashScreen,
     expireSession,
     isProfileDrawerOpen,
     openProfileDrawer,
@@ -270,6 +271,18 @@ export const UserProfileDropdown: React.FC = () => {
               >
                 <Settings size={14} className="text-zinc-500" />
                 <span>Revisit Onboarding</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setIsOpen(false);
+                  restartSplashScreen();
+                }}
+                className="w-full min-h-[40px] px-3 rounded-lg text-xs font-medium text-indigo-700 hover:bg-indigo-50/60 transition-colors flex items-center gap-2 text-left"
+              >
+                <Sparkles size={14} className="text-indigo-600" />
+                <span>Replay Welcome Experience</span>
               </button>
 
               <div className="h-px bg-zinc-100 my-1" />

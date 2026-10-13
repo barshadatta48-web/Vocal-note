@@ -23,6 +23,8 @@ export const SubscriptionView: React.FC = () => {
     closeSubscriptionModal,
     upgradeSubscription,
     openStudentVerificationModal,
+    gatedFeatureContext,
+    clearGatedFeatureContext,
   } = useAuth();
 
   const [billingCycle, setBillingCycle] = useState<BillingCycle>('annual');
@@ -68,6 +70,7 @@ export const SubscriptionView: React.FC = () => {
   };
 
   const handleClose = () => {
+    clearGatedFeatureContext();
     setCheckoutStep('plans');
     setSelectedTier(null);
     closeSubscriptionModal();
@@ -148,6 +151,31 @@ export const SubscriptionView: React.FC = () => {
         <div className="px-5 sm:px-8 py-5 sm:py-6 overflow-y-auto flex-1 space-y-6">
           {checkoutStep === 'plans' && (
             <div className="space-y-6">
+              {/* Contextual Gated Feature Alert Banner */}
+              {gatedFeatureContext && (
+                <div className="p-3.5 rounded-2xl bg-indigo-50 border border-indigo-200/90 text-indigo-950 text-xs flex items-center justify-between gap-3 shadow-xs">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2 rounded-xl bg-indigo-600 text-white shrink-0">
+                      <Sparkles size={16} />
+                    </div>
+                    <div>
+                      <span className="font-bold block">Unlock {gatedFeatureContext}</span>
+                      <span className="text-[11px] text-indigo-700">
+                        Choose Featured Base or the discounted Student Plan (₹149/mo) to activate full access.
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={clearGatedFeatureContext}
+                    className="p-1 text-indigo-400 hover:text-indigo-800 rounded-lg transition-colors"
+                    aria-label="Dismiss banner"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              )}
+
               {/* Student Status Quick Notification Bar */}
               <div
                 className={`p-3.5 rounded-2xl border flex items-center justify-between flex-wrap gap-3 transition-colors ${
