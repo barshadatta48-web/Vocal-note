@@ -22,9 +22,18 @@ export type StudentVerificationStatus = 'none' | 'pending' | 'verified' | 'rejec
 export interface UserProfile {
   id: string;
   name: string;
+  displayName?: string;
+  full_name?: string;
+  user_metadata?: {
+    full_name?: string;
+    name?: string;
+    avatar_url?: string;
+    [key: string]: any;
+  };
   email: string;
   role: string;
   avatar: string;
+  avatar_url?: string;
   sessionToken?: string;
   isFirstLogin?: boolean;
   teamSize?: string;

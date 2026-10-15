@@ -77,9 +77,17 @@ export const STORAGE_KEY_DRAFT_PROFILE = 'vocalnote_draft_profile';
 const DEFAULT_DEMO_USER: UserProfile = {
   id: 'usr_demo_101',
   name: 'Barsha Datta',
+  displayName: 'Barsha Datta',
+  full_name: 'Barsha Datta',
+  user_metadata: {
+    full_name: 'Barsha Datta',
+    name: 'Barsha Datta',
+    avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&q=80',
+  },
   email: 'dattabarsha9@gmail.com',
   role: 'Product Designer',
   avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&q=80',
+  avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&q=80',
   teamSize: '2-5 members',
   useCase: 'Voice Brainstorming & Daily Notes',
   themePreference: 'Ocean Teal',
@@ -303,27 +311,82 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const formattedName = existingName.charAt(0).toUpperCase() + existingName.slice(1);
 
     const isDemo = cleanEmail === 'dattabarsha9@gmail.com';
-    const profile: UserProfile = isDemo
-      ? { ...DEFAULT_DEMO_USER, sessionToken: token }
-      : {
-          id: `usr_${Date.now()}`,
-          name: formattedName || 'Barsha Datta',
-          email: cleanEmail,
-          role: 'Creator & Thinker',
-          avatar: `https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&q=80`,
-          teamSize: 'Solo Thinker',
-          useCase: 'Voice Ideation',
-          themePreference: 'Ocean Teal',
-          subscriptionTier: 'base',
-          subscription_plan: 'base',
-          billingCycle: 'monthly',
-          sessionToken: token,
-          isFirstLogin: false,
-          createdAt: new Date().toISOString(),
-          is_student: false,
-          student_verification_status: 'none',
-          institution_name: '',
-        };
+
+    let resolvedName = formattedName || 'Barsha Datta';
+    let resolvedAvatar = 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&q=80';
+    let resolvedRole = 'Creator & Thinker';
+    let resolvedUseCase = 'Voice Ideation';
+    let resolvedTheme = 'Ocean Teal';
+    let resolvedTier: SubscriptionTier = 'base';
+    let isStudent = false;
+
+    // Check if an existing stored user profile exists with customized name/avatar
+    try {
+      const storedUserRaw = localStorage.getItem(STORAGE_KEY_USER);
+      if (storedUserRaw) {
+        const parsed = JSON.parse(storedUserRaw);
+        if (parsed?.email?.toLowerCase() === cleanEmail) {
+          if (parsed.name || parsed.displayName || parsed.full_name) {
+            resolvedName = parsed.name || parsed.displayName || parsed.full_name;
+          }
+          if (parsed.avatar || parsed.avatar_url) {
+            resolvedAvatar = parsed.avatar || parsed.avatar_url;
+          }
+          if (parsed.role) resolvedRole = parsed.role;
+          if (parsed.useCase) resolvedUseCase = parsed.useCase;
+          if (parsed.themePreference) resolvedTheme = parsed.themePreference;
+          if (parsed.subscriptionTier) resolvedTier = parsed.subscriptionTier;
+          if (parsed.is_student) isStudent = Boolean(parsed.is_student);
+        }
+      }
+    } catch (e) {
+      console.warn('[Auth] Failed to parse existing stored user on login:', e);
+    }
+
+    // Check draftProfile from Step 2 if user setup their profile
+    if (draftProfile?.name) {
+      resolvedName = draftProfile.name;
+      if (draftProfile.avatar) resolvedAvatar = draftProfile.avatar;
+      if (draftProfile.role) resolvedRole = draftProfile.role;
+      if (draftProfile.useCase) resolvedUseCase = draftProfile.useCase;
+      if (draftProfile.themePreference) resolvedTheme = draftProfile.themePreference;
+      if (draftProfile.isStudent) isStudent = draftProfile.isStudent;
+    }
+
+    if (isDemo) {
+      resolvedName = DEFAULT_DEMO_USER.name;
+      resolvedAvatar = DEFAULT_DEMO_USER.avatar;
+      resolvedRole = DEFAULT_DEMO_USER.role;
+      resolvedTier = DEFAULT_DEMO_USER.subscriptionTier;
+    }
+
+    const profile: UserProfile = {
+      id: isDemo ? DEFAULT_DEMO_USER.id : `usr_${Date.now()}`,
+      name: resolvedName,
+      displayName: resolvedName,
+      full_name: resolvedName,
+      user_metadata: {
+        full_name: resolvedName,
+        name: resolvedName,
+        avatar_url: resolvedAvatar,
+      },
+      email: cleanEmail,
+      role: resolvedRole,
+      avatar: resolvedAvatar,
+      avatar_url: resolvedAvatar,
+      teamSize: 'Solo Thinker',
+      useCase: resolvedUseCase,
+      themePreference: resolvedTheme,
+      subscriptionTier: resolvedTier,
+      subscription_plan: resolvedTier,
+      billingCycle: 'monthly',
+      sessionToken: token,
+      isFirstLogin: false,
+      createdAt: new Date().toISOString(),
+      is_student: isStudent,
+      student_verification_status: isStudent ? 'verified' : 'none',
+      institution_name: isStudent ? 'Academic Institution' : '',
+    };
 
     const newSession: AuthSession = {
       token,
@@ -376,9 +439,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const newUser: UserProfile = {
       id: `usr_${Date.now()}`,
       name: cleanName,
+      displayName: cleanName,
+      full_name: cleanName,
+      user_metadata: {
+        full_name: cleanName,
+        name: cleanName,
+        avatar_url: userAvatar,
+      },
       email: cleanEmail,
       role: userRole,
       avatar: userAvatar,
+      avatar_url: userAvatar,
       useCase: userUseCase,
       themePreference: userTheme,
       subscriptionTier: 'free',
@@ -429,19 +500,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const token = `vocal_sess_social_${provider}_${Date.now()}`;
     const expiresAt = Date.now() + 24 * 60 * 60 * 1000;
+    const socialAvatar = provider === 'google'
+      ? 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&q=80'
+      : 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=256&q=80';
 
     const profile: UserProfile = {
       id: `usr_${provider}_${Date.now()}`,
       name: providerName,
+      displayName: providerName,
+      full_name: providerName,
+      user_metadata: {
+        full_name: providerName,
+        name: providerName,
+        avatar_url: socialAvatar,
+      },
       email: providerEmail,
       role: isStudentEmail ? 'Graduate Student / Researcher' : 'Fullstack Developer',
-      avatar: provider === 'google'
-        ? 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&q=80'
-        : 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=256&q=80',
+      avatar: socialAvatar,
+      avatar_url: socialAvatar,
       teamSize: '1-3 members',
       useCase: 'Audio Notes & Study Lectures',
       themePreference: 'Ocean Teal',
       subscriptionTier: 'free',
+      subscription_plan: 'free',
       billingCycle: 'monthly',
       sessionToken: token,
       isFirstLogin: false,
@@ -466,10 +547,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       localStorage.setItem(STORAGE_KEY_SESSION, JSON.stringify(newSession));
       localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(profile));
       localStorage.setItem(STORAGE_KEY_ONBOARDED, 'true');
+      localStorage.setItem(STORAGE_KEY_PROFILE_DONE, 'true');
     } catch (e) {
       console.error('[Auth] Failed to write session to localStorage:', e);
     }
 
+    setHasCompletedProfileSetup(true);
     setUser(profile);
     setSession(newSession);
     setIsOnboarded(true);

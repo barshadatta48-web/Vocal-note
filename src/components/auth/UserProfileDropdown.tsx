@@ -14,10 +14,12 @@ import {
   Clock,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { UserProfile } from '../../types/auth';
 
 export const UserProfileDropdown: React.FC = () => {
   const {
     user,
+    isRehydrating,
     openSubscriptionModal,
     openStudentVerificationModal,
     openLogoutModal,
@@ -47,13 +49,51 @@ export const UserProfileDropdown: React.FC = () => {
     };
   }, [isOpen]);
 
-  if (!user) return null;
+  // Loading & Null State Guard: render subtle skeleton placeholder instead of null or throwing errors
+  if (!user || isRehydrating) {
+    return (
+      <div
+        className="min-h-[44px] min-w-[44px] p-1 sm:px-2 rounded-xl bg-white hover:bg-zinc-50 border border-zinc-200/80 transition-all flex items-center gap-2 shadow-xs animate-pulse"
+        aria-label="Loading profile"
+      >
+        <div className="w-8 h-8 rounded-lg bg-zinc-200 shrink-0" />
+        <div className="hidden sm:flex flex-col gap-1 pr-1">
+          <div className="w-16 h-3 bg-zinc-200 rounded" />
+          <div className="w-10 h-2 bg-zinc-100 rounded" />
+        </div>
+        <div className="w-3.5 h-3.5 rounded-full bg-zinc-100 shrink-0" />
+      </div>
+    );
+  }
 
-  // Reference active subscription plan from user session
-  const activePlan = (user.subscription_plan || user.subscriptionTier || 'free').toLowerCase();
+  // Defensive property mappings: support standard and custom backend metadata schemas
+  const displayName =
+    user.name ||
+    user.displayName ||
+    user.full_name ||
+    user.user_metadata?.full_name ||
+    user.user_metadata?.name ||
+    user.email?.split('@')[0] ||
+    'User';
+
+  const avatarUrl =
+    user.avatar ||
+    user.avatar_url ||
+    user.user_metadata?.avatar_url ||
+    `https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&q=80`;
+
+  const emailDisplay = user.email || '';
+
+  const activePlan = (
+    user.subscription_plan ||
+    user.subscriptionTier ||
+    user.user_metadata?.subscription_plan ||
+    'free'
+  ).toLowerCase();
+
   const isStudentPlan = activePlan === 'student';
 
-  const tier = user.subscriptionTier;
+  const tier = user.subscriptionTier || (activePlan as any) || 'free';
   const tierLabel =
     tier === 'student' || isStudentPlan
       ? 'Student Plan'
@@ -66,6 +106,10 @@ export const UserProfileDropdown: React.FC = () => {
   const studentStatus = user.student_verification_status || 'none';
   const isStudentVerified = studentStatus === 'verified';
   const isStudentPending = studentStatus === 'pending';
+
+  const roleDisplay = user.institution_name
+    ? `${user.role || 'Member'} · ${user.institution_name}`
+    : (user.role || 'Member');
 
   const handleToggle = () => {
     if (window.innerWidth < 768) {
@@ -87,8 +131,8 @@ export const UserProfileDropdown: React.FC = () => {
       >
         <div className="relative">
           <img
-            src={user.avatar}
-            alt={user.name}
+            src={avatarUrl}
+            alt={displayName}
             className="w-8 h-8 rounded-lg object-cover ring-1 ring-zinc-200"
           />
           {isStudentPlan ? (
@@ -115,7 +159,7 @@ export const UserProfileDropdown: React.FC = () => {
         <div className="hidden sm:flex flex-col text-left leading-tight pr-1">
           <div className="flex items-center gap-1.5">
             <span className="text-xs font-semibold text-zinc-800 truncate max-w-[110px]">
-              {user.name}
+              {displayName}
             </span>
             {/* Green STUDENT badge - conditionally rendered ONLY when active subscription plan is 'student' */}
             {isStudentPlan && (
@@ -147,22 +191,22 @@ export const UserProfileDropdown: React.FC = () => {
             <div className="p-4 border-b border-zinc-100">
               <div className="flex items-center gap-3">
                 <img
-                  src={user.avatar}
-                  alt={user.name}
+                  src={avatarUrl}
+                  alt={displayName}
                   className="w-10 h-10 rounded-xl object-cover ring-1 ring-zinc-200"
                 />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
-                    <h4 className="text-xs font-bold text-zinc-900 truncate">{user.name}</h4>
+                    <h4 className="text-xs font-bold text-zinc-900 truncate">{displayName}</h4>
                     {isStudentPlan && (
                       <span title="Student Plan" className="inline-flex">
                         <CheckCircle2 size={13} className="text-emerald-600 shrink-0" />
                       </span>
                     )}
                   </div>
-                  <p className="text-[11px] text-zinc-400 truncate">{user.email}</p>
+                  <p className="text-[11px] text-zinc-400 truncate">{emailDisplay}</p>
                   <span className="inline-block mt-0.5 text-[10px] font-medium text-zinc-500 truncate">
-                    {user.institution_name ? `${user.role} · ${user.institution_name}` : user.role}
+                    {roleDisplay}
                   </span>
                 </div>
               </div>
@@ -345,22 +389,22 @@ export const UserProfileDropdown: React.FC = () => {
               <div className="p-5 pb-4 border-b border-zinc-100 flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <img
-                    src={user.avatar}
-                    alt={user.name}
+                    src={avatarUrl}
+                    alt={displayName}
                     className="w-12 h-12 rounded-2xl object-cover ring-1 ring-zinc-200"
                   />
                   <div>
                     <div className="flex items-center gap-2">
-                      <h3 className="text-sm font-bold text-zinc-900">{user.name}</h3>
+                      <h3 className="text-sm font-bold text-zinc-900">{displayName}</h3>
                       {isStudentPlan && (
                         <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800">
                           Student
                         </span>
                       )}
                     </div>
-                    <p className="text-xs text-zinc-400">{user.email}</p>
+                    <p className="text-xs text-zinc-400">{emailDisplay}</p>
                     <span className="text-[11px] font-medium text-zinc-500">
-                      {user.institution_name ? `${user.role} · ${user.institution_name}` : user.role}
+                      {roleDisplay}
                     </span>
                   </div>
                 </div>
@@ -464,7 +508,7 @@ export const UserProfileDropdown: React.FC = () => {
                     className="w-full min-h-[48px] px-4 rounded-xl text-xs font-medium text-zinc-800 hover:bg-zinc-50 border border-zinc-200 flex items-center justify-between"
                   >
                     <span>Plans & Pricing (₹)</span>
-                    <span className="text-zinc-400">›</span>
+                    <span className="text-[11px] font-bold text-zinc-400">INR</span>
                   </button>
 
                   <button
@@ -473,13 +517,13 @@ export const UserProfileDropdown: React.FC = () => {
                       closeProfileDrawer();
                       openStudentVerificationModal();
                     }}
-                    className="w-full min-h-[48px] px-4 rounded-xl text-xs font-medium text-emerald-800 bg-emerald-50/40 hover:bg-emerald-50 border border-emerald-200/70 flex items-center justify-between"
+                    className="w-full min-h-[48px] px-4 rounded-xl text-xs font-medium text-emerald-800 hover:bg-emerald-50/70 border border-emerald-200 flex items-center justify-between"
                   >
                     <div className="flex items-center gap-2">
-                      <GraduationCap size={16} className="text-emerald-700" />
-                      <span>Student Verification Portal</span>
+                      <GraduationCap size={16} className="text-emerald-600" />
+                      <span>Student Verification</span>
                     </div>
-                    <span className="text-emerald-600 font-bold text-xs">50% Off</span>
+                    <span className="text-[11px] font-bold text-emerald-700">50% Off</span>
                   </button>
 
                   <button
@@ -487,35 +531,20 @@ export const UserProfileDropdown: React.FC = () => {
                     onClick={restartOnboarding}
                     className="w-full min-h-[48px] px-4 rounded-xl text-xs font-medium text-zinc-800 hover:bg-zinc-50 border border-zinc-200 flex items-center justify-between"
                   >
-                    <span>Revisit Onboarding Wizard</span>
-                    <span className="text-zinc-400">›</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      closeProfileDrawer();
-                      expireSession('Session expired (401 Unauthorized test). Please log in again.');
-                    }}
-                    className="w-full min-h-[48px] px-4 rounded-xl text-xs font-medium text-amber-800 bg-amber-50/50 hover:bg-amber-50 border border-amber-200/80 flex items-center justify-between transition-colors"
-                  >
-                    <div className="flex items-center gap-2">
-                      <AlertTriangle size={15} className="text-amber-600" />
-                      <span>Test 401 Session Expiry</span>
-                    </div>
-                    <span className="text-amber-500 text-xs">Simulate</span>
+                    <span>Onboarding Wizard</span>
+                    <Settings size={14} className="text-zinc-400" />
                   </button>
                 </div>
 
-                {/* Sign Out */}
-                <div className="pt-2">
+                {/* Mobile Drawer Logout */}
+                <div className="pt-2 border-t border-zinc-100">
                   <button
                     type="button"
                     onClick={openLogoutModal}
-                    className="w-full min-h-[48px] px-4 rounded-xl text-xs font-semibold text-rose-600 bg-rose-50/50 hover:bg-rose-50 border border-rose-200/80 flex items-center justify-center gap-2"
+                    className="w-full min-h-[48px] px-4 rounded-xl bg-rose-50 text-rose-600 hover:bg-rose-100 text-xs font-semibold flex items-center justify-center gap-2 transition-colors"
                   >
                     <LogOut size={16} />
-                    <span>Log Out of Vocal Note</span>
+                    <span>Sign Out</span>
                   </button>
                 </div>
               </div>
