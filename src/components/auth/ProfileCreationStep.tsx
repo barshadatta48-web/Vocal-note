@@ -1,16 +1,7 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
-import { User, Sparkles, Check, ArrowRight, ArrowLeft, Mic, GraduationCap, Palette, Briefcase, FileText } from 'lucide-react';
-import { DraftProfile } from '../../types/auth';
-
-const AVATAR_OPTIONS = [
-  'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&q=80',
-  'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&w=256&q=80',
-  'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=256&q=80',
-  'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=256&q=80',
-  'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=256&q=80',
-  'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=256&q=80',
-];
+import { Check, ArrowRight, GraduationCap, Palette, Briefcase, FileText } from 'lucide-react';
+import { DraftProfile, generateInitialsAvatar } from '../../types/auth';
 
 const ROLES = [
   { id: 'student', label: 'Student / Scholar', icon: GraduationCap, desc: 'Lectures & thesis notes' },
@@ -38,10 +29,11 @@ export const ProfileCreationStep: React.FC<ProfileCreationStepProps> = ({
   onAlreadyHaveAccount,
 }) => {
   const [name, setName] = useState(initialData?.name || 'Barsha Datta');
-  const [avatar, setAvatar] = useState(initialData?.avatar || AVATAR_OPTIONS[0]);
   const [selectedRole, setSelectedRole] = useState(initialData?.role || ROLES[0].label);
   const [useCase, setUseCase] = useState(initialData?.useCase || USE_CASES[0].label);
   const [error, setError] = useState('');
+
+  const previewAvatar = generateInitialsAvatar(name.trim() || 'User');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -52,9 +44,12 @@ export const ProfileCreationStep: React.FC<ProfileCreationStepProps> = ({
 
     const isStudent = selectedRole.toLowerCase().includes('student');
 
+    // Automatically generate initials/default system avatar
+    const autoAvatar = generateInitialsAvatar(name.trim());
+
     const draft: DraftProfile = {
       name: name.trim(),
-      avatar,
+      avatar: autoAvatar,
       role: selectedRole,
       useCase,
       themePreference: 'Warm Paper',
@@ -100,11 +95,31 @@ export const ProfileCreationStep: React.FC<ProfileCreationStepProps> = ({
             </p>
           </div>
 
+          {/* Automatic Initials Avatar Badge (bypasses manual avatar selection) */}
+          <div className="flex items-center gap-3.5 p-3.5 rounded-2xl bg-zinc-50 border border-zinc-200/80 mb-6">
+            <img
+              src={previewAvatar}
+              alt={name || 'Avatar'}
+              className="w-12 h-12 rounded-xl object-cover shadow-xs border border-zinc-200"
+            />
+            <div className="min-w-0 flex-1">
+              <div className="text-xs font-bold text-zinc-800 truncate">
+                {name.trim() || 'Your Name'}
+              </div>
+              <div className="text-[11px] text-zinc-400 font-medium">
+                Default system initials avatar generated automatically
+              </div>
+            </div>
+            <span className="text-[10px] font-semibold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-md shrink-0">
+              Auto-Assigned
+            </span>
+          </div>
+
           <form onSubmit={handleSubmit} className="space-y-6">
             {/* 1. Name Input */}
             <div>
               <label className="block text-xs font-bold text-zinc-700 uppercase tracking-wider mb-2">
-                Display Name
+                Full Name
               </label>
               <div className="relative">
                 <input
@@ -123,43 +138,7 @@ export const ProfileCreationStep: React.FC<ProfileCreationStepProps> = ({
               {error && <p className="text-[11px] text-rose-500 mt-1.5 font-medium">{error}</p>}
             </div>
 
-            {/* 2. Avatar Choice */}
-            <div>
-              <label className="block text-xs font-bold text-zinc-700 uppercase tracking-wider mb-2">
-                Choose an Avatar
-              </label>
-              <div className="grid grid-cols-6 gap-2 sm:gap-3">
-                {AVATAR_OPTIONS.map((imgUrl, idx) => {
-                  const isSelected = avatar === imgUrl;
-                  return (
-                    <button
-                      key={idx}
-                      type="button"
-                      onClick={() => setAvatar(imgUrl)}
-                      className={`relative aspect-square rounded-2xl overflow-hidden border-2 transition-all p-0.5 ${
-                        isSelected
-                          ? 'border-zinc-900 ring-2 ring-zinc-900/20 scale-105'
-                          : 'border-zinc-200 hover:border-zinc-400 opacity-80 hover:opacity-100'
-                      }`}
-                      title={`Avatar option ${idx + 1}`}
-                    >
-                      <img
-                        src={imgUrl}
-                        alt={`Avatar ${idx + 1}`}
-                        className="w-full h-full object-cover rounded-xl"
-                      />
-                      {isSelected && (
-                        <div className="absolute inset-0 bg-black/25 flex items-center justify-center">
-                          <Check size={14} className="text-white drop-shadow" />
-                        </div>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* 3. Primary Role / Persona */}
+            {/* 2. Primary Role / Persona */}
             <div>
               <label className="block text-xs font-bold text-zinc-700 uppercase tracking-wider mb-2">
                 Primary Role
@@ -194,7 +173,7 @@ export const ProfileCreationStep: React.FC<ProfileCreationStepProps> = ({
               </div>
             </div>
 
-            {/* 4. Primary Use Case */}
+            {/* 3. Primary Goal */}
             <div>
               <label className="block text-xs font-bold text-zinc-700 uppercase tracking-wider mb-2">
                 Primary Goal

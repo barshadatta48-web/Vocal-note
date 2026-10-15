@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Check, ArrowRight, ArrowLeft, Mic, FileText, Palette, Compass, Users } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useAppRouter } from '../../context/RouterContext';
-import { OnboardingData } from '../../types/auth';
+import { OnboardingData, generateInitialsAvatar } from '../../types/auth';
 
 const ROLES = [
   'Product Designer',
@@ -72,7 +72,7 @@ export const OnboardingFlow: React.FC = () => {
     const data: OnboardingData = {
       name: name.trim() || 'Barsha Datta',
       role: customRole.trim() || role || 'Product Designer',
-      avatar: user?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&q=80',
+      avatar: user?.avatar || generateInitialsAvatar(name.trim() || user?.name || 'User'),
       useCase,
       teamSize,
       themePreference,

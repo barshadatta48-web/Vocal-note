@@ -2,14 +2,7 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Check, ArrowRight, ArrowLeft, User, Briefcase, Sparkles, CheckCircle2, Upload, Camera, Compass, Layers, Palette, Users, Mic, Rocket } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { OnboardingData } from '../../types/auth';
-
-const AVATAR_PRESETS = [
-  'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&q=80',
-  'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=256&q=80',
-  'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&w=256&q=80',
-  'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=256&q=80',
-];
+import { OnboardingData, generateInitialsAvatar } from '../../types/auth';
 
 const ROLES = [
   'Product Designer',
@@ -68,30 +61,19 @@ export const OnboardingWizard: React.FC = () => {
   const [name, setName] = useState(user?.name || 'Barsha Datta');
   const [role, setRole] = useState(user?.role || 'Product Designer');
   const [customRole, setCustomRole] = useState('');
-  const [avatar, setAvatar] = useState(user?.avatar || AVATAR_PRESETS[0]);
   
   const [useCase, setUseCase] = useState(user?.useCase || USE_CASES[0].title);
   const [teamSize, setTeamSize] = useState(user?.teamSize || TEAM_SIZES[0].label);
   const [themePreference, setThemePreference] = useState(user?.themePreference || THEMES[0].name);
 
-  const handleAvatarFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (typeof reader.result === 'string') {
-          setAvatar(reader.result);
-        }
-      };
-      reader.readAsDataURL(file);
-    }
-  };
+  // Automatically derive default initials avatar from name
+  const autoAvatar = generateInitialsAvatar(name.trim() || user?.name || 'User');
 
   const handleFinish = () => {
     const data: OnboardingData = {
-      name: name.trim() || 'Barsha Datta',
+      name: name.trim() || user?.name || 'Barsha Datta',
       role: customRole.trim() || role || 'Product Designer',
-      avatar,
+      avatar: autoAvatar,
       useCase,
       teamSize,
       themePreference,
@@ -185,69 +167,24 @@ export const OnboardingWizard: React.FC = () => {
                 </div>
 
                 {/* Avatar Selection & Upload */}
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
-                    Choose Your Avatar
-                  </label>
-                  <div className="flex flex-wrap items-center gap-3 sm:gap-4">
-                    {/* Active avatar preview */}
-                    <div className="relative group">
-                      <img
-                        src={avatar}
-                        alt="Avatar preview"
-                        className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl object-cover ring-4 ring-teal-500/30 shadow-md"
-                      />
-                      <label
-                        htmlFor="avatar-upload"
-                        className="absolute inset-0 bg-black/40 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer text-white"
-                        title="Upload custom image"
-                      >
-                        <Camera size={20} />
-                      </label>
-                      <input
-                        id="avatar-upload"
-                        type="file"
-                        accept="image/*"
-                        onChange={handleAvatarFile}
-                        className="hidden"
-                      />
+                {/* Automatic Initials Avatar Badge (bypasses manual avatar selection) */}
+                <div className="flex items-center gap-3.5 p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 mb-2">
+                  <img
+                    src={autoAvatar}
+                    alt={name || 'Avatar'}
+                    className="w-12 h-12 rounded-xl object-cover shadow-xs border border-slate-200"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs font-bold text-slate-800 truncate">
+                      {name.trim() || 'Your Name'}
                     </div>
-
-                    {/* Presets */}
-                    <div className="flex items-center gap-2 sm:gap-2.5">
-                      {AVATAR_PRESETS.map((p, idx) => (
-                        <button
-                          key={idx}
-                          type="button"
-                          onClick={() => setAvatar(p)}
-                          className={`w-11 h-11 sm:w-12 sm:h-12 rounded-xl overflow-hidden transition-all border-2 ${
-                            avatar === p
-                              ? 'border-teal-600 scale-105 shadow-md ring-2 ring-teal-200'
-                              : 'border-transparent opacity-70 hover:opacity-100 hover:scale-102'
-                          }`}
-                        >
-                          <img src={p} alt={`Preset ${idx + 1}`} className="w-full h-full object-cover" />
-                        </button>
-                      ))}
-
-                      {/* Custom Upload Button */}
-                      <label
-                        htmlFor="avatar-upload-btn"
-                        className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl border border-dashed border-slate-300 hover:border-teal-500 bg-slate-50 hover:bg-teal-50/50 flex flex-col items-center justify-center text-slate-500 hover:text-teal-600 cursor-pointer transition-all min-h-[44px]"
-                        title="Upload from device"
-                      >
-                        <Upload size={16} />
-                        <span className="text-[9px] font-bold mt-0.5">Upload</span>
-                      </label>
-                      <input
-                        id="avatar-upload-btn"
-                        type="file"
-                        accept="image/*"
-                        onChange={handleAvatarFile}
-                        className="hidden"
-                      />
+                    <div className="text-[11px] text-slate-400 font-medium">
+                      Initials avatar automatically generated
                     </div>
                   </div>
+                  <span className="text-[10px] font-semibold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-md shrink-0">
+                    Auto-Assigned
+                  </span>
                 </div>
 
                 {/* Full Name Input */}
@@ -458,7 +395,7 @@ export const OnboardingWizard: React.FC = () => {
                 <div className="max-w-md mx-auto bg-slate-50/90 rounded-2xl p-4 sm:p-5 border border-slate-200/70 text-left shadow-inner space-y-3">
                   <div className="flex items-center gap-3 pb-3 border-b border-slate-200/60">
                     <img
-                      src={avatar}
+                      src={autoAvatar}
                       alt={name}
                       className="w-12 h-12 rounded-xl object-cover ring-2 ring-white shadow-sm"
                     />

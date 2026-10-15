@@ -81,6 +81,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
         // Brand-new registration handshake: stores session & grants full dashboard access
         await signup(name, email, password);
       }
+      navigate('/dashboard', { replace: true });
     } catch (err: any) {
       setErrors({
         general: err?.message || 'Authentication failed. Please verify your credentials.',
@@ -95,6 +96,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     setErrors({});
     try {
       await socialLogin(provider);
+      navigate('/dashboard', { replace: true });
     } catch (err: any) {
       setErrors({ general: err?.message || 'Social authentication failed.' });
     } finally {

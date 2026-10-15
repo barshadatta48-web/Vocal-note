@@ -10,6 +10,7 @@ import {
   StudentVerificationStatus,
   DraftProfile,
   SequentialFlowStep,
+  generateInitialsAvatar,
 } from '../types/auth';
 
 interface AuthContextType {
@@ -67,12 +68,34 @@ interface AuthContextType {
 export const STORAGE_KEY_TOKEN = 'vocalnote_session_token';
 export const STORAGE_KEY_SESSION = 'vocalnote_auth_session';
 export const STORAGE_KEY_USER = 'vocalnote_auth_user';
+export const STORAGE_KEY_USER_REGISTRY = 'vocalnote_user_registry';
 export const STORAGE_KEY_ONBOARDED = 'vocalnote_auth_onboarded';
 export const STORAGE_KEY_REMEMBER = 'vocalnote_remember_me';
 export const STORAGE_KEY_NOTIFICATION = 'vocalnote_auth_notification';
 export const STORAGE_KEY_SPLASH_SEEN = 'vocalnote_splash_seen';
 export const STORAGE_KEY_PROFILE_DONE = 'vocalnote_profile_setup_done';
 export const STORAGE_KEY_DRAFT_PROFILE = 'vocalnote_draft_profile';
+
+export const getStoredUserRegistry = (): Record<string, UserProfile> => {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_USER_REGISTRY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+};
+
+export const saveToUserRegistry = (profile: UserProfile) => {
+  if (typeof window === 'undefined' || !profile.email) return;
+  try {
+    const registry = getStoredUserRegistry();
+    registry[profile.email.toLowerCase().trim()] = profile;
+    localStorage.setItem(STORAGE_KEY_USER_REGISTRY, JSON.stringify(registry));
+  } catch (e) {
+    console.warn('[Auth] Failed to update user registry:', e);
+  }
+};
 
 const DEFAULT_DEMO_USER: UserProfile = {
   id: 'usr_demo_101',
@@ -82,12 +105,12 @@ const DEFAULT_DEMO_USER: UserProfile = {
   user_metadata: {
     full_name: 'Barsha Datta',
     name: 'Barsha Datta',
-    avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&q=80',
+    avatar_url: generateInitialsAvatar('Barsha Datta'),
   },
   email: 'dattabarsha9@gmail.com',
   role: 'Product Designer',
-  avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&q=80',
-  avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&q=80',
+  avatar: generateInitialsAvatar('Barsha Datta'),
+  avatar_url: generateInitialsAvatar('Barsha Datta'),
   teamSize: '2-5 members',
   useCase: 'Voice Brainstorming & Daily Notes',
   themePreference: 'Ocean Teal',
@@ -231,9 +254,39 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           return;
         }
 
-        // Token is valid and non-expired: restore authenticated session
+        // Token is valid and non-expired: restore authenticated session with resilient property mappings
+        const resolvedName =
+          parsedUser.name ||
+          parsedUser.displayName ||
+          parsedUser.full_name ||
+          parsedUser.user_metadata?.full_name ||
+          parsedUser.user_metadata?.name ||
+          (parsedUser.email ? parsedUser.email.split('@')[0] : 'User');
+
+        const resolvedAvatar =
+          parsedUser.avatar ||
+          parsedUser.avatar_url ||
+          parsedUser.user_metadata?.avatar_url ||
+          generateInitialsAvatar(resolvedName);
+
+        const normalizedUser: UserProfile = {
+          ...parsedUser,
+          name: resolvedName,
+          displayName: resolvedName,
+          full_name: resolvedName,
+          avatar: resolvedAvatar,
+          avatar_url: resolvedAvatar,
+          user_metadata: {
+            ...(parsedUser.user_metadata || {}),
+            full_name: resolvedName,
+            name: resolvedName,
+            email: parsedUser.email,
+            avatar_url: resolvedAvatar,
+          },
+        };
+
         if (isMounted) {
-          setUser(parsedUser);
+          setUser(normalizedUser);
           setSession(parsedSession);
           setAuthStatus('authenticated');
           setIsOnboarded(storedOnboarded === 'true');
@@ -301,91 +354,105 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [expireSession]);
 
   const login = async (email: string, _password: string, rememberMe = true): Promise<boolean> => {
-    await new Promise((res) => setTimeout(res, 350));
-
     const token = `vocal_sess_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
     const expiresAt = Date.now() + 24 * 60 * 60 * 1000;
     const cleanEmail = email.trim().toLowerCase();
 
-    const existingName = cleanEmail.split('@')[0].replace(/[._]/g, ' ');
-    const formattedName = existingName.charAt(0).toUpperCase() + existingName.slice(1);
+    // Derive formatted display name from email prefix
+    const emailPrefix = cleanEmail.split('@')[0];
+    const nameSegments = emailPrefix.split(/[._-]/).filter(Boolean);
+    const fallbackName = nameSegments.length > 0
+      ? nameSegments.map((seg) => seg.charAt(0).toUpperCase() + seg.slice(1).toLowerCase()).join(' ')
+      : 'User';
 
-    const isDemo = cleanEmail === 'dattabarsha9@gmail.com';
-
-    let resolvedName = formattedName || 'Barsha Datta';
-    let resolvedAvatar = 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&q=80';
+    let resolvedName = fallbackName;
+    let resolvedAvatar = '';
     let resolvedRole = 'Creator & Thinker';
     let resolvedUseCase = 'Voice Ideation';
     let resolvedTheme = 'Ocean Teal';
     let resolvedTier: SubscriptionTier = 'base';
     let isStudent = false;
+    let studentStatus: StudentVerificationStatus = 'none';
+    let institutionName = '';
 
-    // Check if an existing stored user profile exists with customized name/avatar
-    try {
-      const storedUserRaw = localStorage.getItem(STORAGE_KEY_USER);
-      if (storedUserRaw) {
-        const parsed = JSON.parse(storedUserRaw);
-        if (parsed?.email?.toLowerCase() === cleanEmail) {
-          if (parsed.name || parsed.displayName || parsed.full_name) {
-            resolvedName = parsed.name || parsed.displayName || parsed.full_name;
-          }
-          if (parsed.avatar || parsed.avatar_url) {
-            resolvedAvatar = parsed.avatar || parsed.avatar_url;
-          }
-          if (parsed.role) resolvedRole = parsed.role;
-          if (parsed.useCase) resolvedUseCase = parsed.useCase;
-          if (parsed.themePreference) resolvedTheme = parsed.themePreference;
-          if (parsed.subscriptionTier) resolvedTier = parsed.subscriptionTier;
-          if (parsed.is_student) isStudent = Boolean(parsed.is_student);
-        }
-      }
-    } catch (e) {
-      console.warn('[Auth] Failed to parse existing stored user on login:', e);
+    // 1. Check persistent user registry for this email
+    const registry = getStoredUserRegistry();
+    const existingUser = registry[cleanEmail];
+    if (existingUser) {
+      resolvedName =
+        existingUser.name ||
+        existingUser.displayName ||
+        existingUser.full_name ||
+        existingUser.user_metadata?.full_name ||
+        existingUser.user_metadata?.name ||
+        resolvedName;
+      resolvedAvatar =
+        existingUser.avatar ||
+        existingUser.avatar_url ||
+        existingUser.user_metadata?.avatar_url ||
+        '';
+      resolvedRole = existingUser.role || resolvedRole;
+      resolvedUseCase = existingUser.useCase || resolvedUseCase;
+      resolvedTheme = existingUser.themePreference || resolvedTheme;
+      resolvedTier = existingUser.subscriptionTier || resolvedTier;
+      isStudent = Boolean(existingUser.is_student);
+      studentStatus = existingUser.student_verification_status || (isStudent ? 'verified' : 'none');
+      institutionName = existingUser.institution_name || '';
     }
 
-    // Check draftProfile from Step 2 if user setup their profile
+    // 2. Check draftProfile from Step 2 if user setup their profile in onboarding
     if (draftProfile?.name) {
       resolvedName = draftProfile.name;
       if (draftProfile.avatar) resolvedAvatar = draftProfile.avatar;
       if (draftProfile.role) resolvedRole = draftProfile.role;
       if (draftProfile.useCase) resolvedUseCase = draftProfile.useCase;
       if (draftProfile.themePreference) resolvedTheme = draftProfile.themePreference;
-      if (draftProfile.isStudent) isStudent = draftProfile.isStudent;
+      if (draftProfile.isStudent) {
+        isStudent = true;
+        studentStatus = 'verified';
+        institutionName = 'Academic Institution';
+      }
     }
 
-    if (isDemo) {
+    // 3. Fallback for default email
+    if (cleanEmail === DEFAULT_DEMO_USER.email.toLowerCase() && !existingUser && !draftProfile?.name) {
       resolvedName = DEFAULT_DEMO_USER.name;
-      resolvedAvatar = DEFAULT_DEMO_USER.avatar;
       resolvedRole = DEFAULT_DEMO_USER.role;
       resolvedTier = DEFAULT_DEMO_USER.subscriptionTier;
     }
 
+    // Automatically assign default initials avatar if none exists
+    if (!resolvedAvatar || resolvedAvatar.includes('unsplash')) {
+      resolvedAvatar = generateInitialsAvatar(resolvedName);
+    }
+
     const profile: UserProfile = {
-      id: isDemo ? DEFAULT_DEMO_USER.id : `usr_${Date.now()}`,
+      id: existingUser?.id || `usr_${Date.now()}`,
       name: resolvedName,
       displayName: resolvedName,
       full_name: resolvedName,
       user_metadata: {
         full_name: resolvedName,
         name: resolvedName,
+        email: cleanEmail,
         avatar_url: resolvedAvatar,
       },
       email: cleanEmail,
       role: resolvedRole,
       avatar: resolvedAvatar,
       avatar_url: resolvedAvatar,
-      teamSize: 'Solo Thinker',
+      teamSize: existingUser?.teamSize || 'Solo Thinker',
       useCase: resolvedUseCase,
       themePreference: resolvedTheme,
       subscriptionTier: resolvedTier,
       subscription_plan: resolvedTier,
-      billingCycle: 'monthly',
+      billingCycle: existingUser?.billingCycle || 'monthly',
       sessionToken: token,
       isFirstLogin: false,
-      createdAt: new Date().toISOString(),
+      createdAt: existingUser?.createdAt || new Date().toISOString(),
       is_student: isStudent,
-      student_verification_status: isStudent ? 'verified' : 'none',
-      institution_name: isStudent ? 'Academic Institution' : '',
+      student_verification_status: studentStatus,
+      institution_name: institutionName,
     };
 
     const newSession: AuthSession = {
@@ -407,6 +474,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } else {
         localStorage.removeItem(STORAGE_KEY_REMEMBER);
       }
+      saveToUserRegistry(profile);
     } catch (e) {
       console.error('[Auth] Failed to write session to localStorage:', e);
     }
@@ -416,13 +484,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setSession(newSession);
     setIsOnboarded(true);
     setAuthStatus('authenticated');
+    setIsRehydrating(false);
     setNotification(null);
     return true;
   };
 
   const signup = async (name: string, email: string, _password: string): Promise<boolean> => {
-    await new Promise((res) => setTimeout(res, 400));
-
     const token = `vocal_sess_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
     const expiresAt = Date.now() + 24 * 60 * 60 * 1000;
     const cleanEmail = email.trim().toLowerCase();
@@ -430,7 +497,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const isStudentEmail = /@(.*\.)?(edu|ac\.in|edu\.in|ac\.uk|edu\.au|edu\.sg|school|uni)/i.test(cleanEmail);
 
-    const userAvatar = draftProfile?.avatar || `https://api.dicebear.com/7.x/notionists/svg?seed=${encodeURIComponent(cleanName)}&backgroundColor=e2e8f0`;
+    const userAvatar = draftProfile?.avatar || generateInitialsAvatar(cleanName);
     const userRole = draftProfile?.role || (isStudentEmail ? 'Student / Scholar' : 'Member');
     const userUseCase = draftProfile?.useCase || 'Voice Ideation';
     const userTheme = draftProfile?.themePreference || 'Warm Paper';
@@ -444,6 +511,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       user_metadata: {
         full_name: cleanName,
         name: cleanName,
+        email: cleanEmail,
         avatar_url: userAvatar,
       },
       email: cleanEmail,
@@ -478,6 +546,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(newUser));
       localStorage.setItem(STORAGE_KEY_ONBOARDED, 'true');
       localStorage.setItem(STORAGE_KEY_PROFILE_DONE, 'true');
+      saveToUserRegistry(newUser);
     } catch (e) {
       console.error('[Auth] Failed to write session to localStorage:', e);
     }
@@ -487,22 +556,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setSession(newSession);
     setIsOnboarded(true);
     setAuthStatus('authenticated');
+    setIsRehydrating(false);
     setNotification(null);
     return true;
   };
 
   const socialLogin = async (provider: 'google' | 'github'): Promise<boolean> => {
-    await new Promise((res) => setTimeout(res, 450));
-
     const providerEmail = provider === 'google' ? 'student.scholar@stanford.edu' : 'github.creator@dev.io';
     const providerName = provider === 'google' ? 'Alex Rivera (Stanford Student)' : 'Devon Vance';
     const isStudentEmail = provider === 'google';
 
     const token = `vocal_sess_social_${provider}_${Date.now()}`;
     const expiresAt = Date.now() + 24 * 60 * 60 * 1000;
-    const socialAvatar = provider === 'google'
-      ? 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&q=80'
-      : 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=256&q=80';
+    const socialAvatar = generateInitialsAvatar(providerName);
 
     const profile: UserProfile = {
       id: `usr_${provider}_${Date.now()}`,
@@ -512,6 +578,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       user_metadata: {
         full_name: providerName,
         name: providerName,
+        email: providerEmail,
         avatar_url: socialAvatar,
       },
       email: providerEmail,
@@ -548,6 +615,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(profile));
       localStorage.setItem(STORAGE_KEY_ONBOARDED, 'true');
       localStorage.setItem(STORAGE_KEY_PROFILE_DONE, 'true');
+      saveToUserRegistry(profile);
     } catch (e) {
       console.error('[Auth] Failed to write session to localStorage:', e);
     }
@@ -557,6 +625,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setSession(newSession);
     setIsOnboarded(true);
     setAuthStatus('authenticated');
+    setIsRehydrating(false);
     setNotification(null);
     return true;
   };

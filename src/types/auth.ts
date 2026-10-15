@@ -95,3 +95,19 @@ export interface DraftProfile {
   themePreference: string;
   isStudent?: boolean;
 }
+
+export const generateInitialsAvatar = (name: string): string => {
+  const cleanName = (name || 'User').trim();
+  const initials =
+    cleanName
+      .split(' ')
+      .filter(Boolean)
+      .map((part) => part[0])
+      .join('')
+      .toUpperCase()
+      .slice(0, 2) || 'U';
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100"><rect width="100" height="100" rx="28" fill="#18181b"/><text x="50" y="58" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="38" font-weight="700" fill="#ffffff" text-anchor="middle" dominant-baseline="central">${initials}</text></svg>`;
+
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+};

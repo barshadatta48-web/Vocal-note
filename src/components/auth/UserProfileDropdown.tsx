@@ -14,7 +14,7 @@ import {
   Clock,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { UserProfile } from '../../types/auth';
+import { UserProfile, generateInitialsAvatar } from '../../types/auth';
 
 export const UserProfileDropdown: React.FC = () => {
   const {
@@ -57,9 +57,9 @@ export const UserProfileDropdown: React.FC = () => {
         aria-label="Loading profile"
       >
         <div className="w-8 h-8 rounded-lg bg-zinc-200 shrink-0" />
-        <div className="hidden sm:flex flex-col gap-1 pr-1">
-          <div className="w-16 h-3 bg-zinc-200 rounded" />
-          <div className="w-10 h-2 bg-zinc-100 rounded" />
+        <div className="flex flex-col gap-1 pr-1">
+          <div className="w-14 sm:w-16 h-3 bg-zinc-200 rounded" />
+          <div className="w-9 sm:w-10 h-2 bg-zinc-100 rounded" />
         </div>
         <div className="w-3.5 h-3.5 rounded-full bg-zinc-100 shrink-0" />
       </div>
@@ -73,14 +73,14 @@ export const UserProfileDropdown: React.FC = () => {
     user.full_name ||
     user.user_metadata?.full_name ||
     user.user_metadata?.name ||
-    user.email?.split('@')[0] ||
+    (user.email ? user.email.split('@')[0] : '') ||
     'User';
 
   const avatarUrl =
     user.avatar ||
     user.avatar_url ||
     user.user_metadata?.avatar_url ||
-    `https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&q=80`;
+    generateInitialsAvatar(displayName);
 
   const emailDisplay = user.email || '';
 
@@ -155,20 +155,20 @@ export const UserProfileDropdown: React.FC = () => {
           )}
         </div>
 
-        {/* User Info (Hidden on mobile small screen) */}
-        <div className="hidden sm:flex flex-col text-left leading-tight pr-1">
-          <div className="flex items-center gap-1.5">
-            <span className="text-xs font-semibold text-zinc-800 truncate max-w-[110px]">
+        {/* User Info (Visible across viewports with responsive max-width) */}
+        <div className="flex flex-col text-left leading-tight pr-0.5 sm:pr-1 max-w-[85px] sm:max-w-[125px]">
+          <div className="flex items-center gap-1 sm:gap-1.5">
+            <span className="text-[11px] sm:text-xs font-semibold text-zinc-800 truncate">
               {displayName}
             </span>
             {/* Green STUDENT badge - conditionally rendered ONLY when active subscription plan is 'student' */}
             {isStudentPlan && (
-              <span className="text-[9px] font-extrabold uppercase bg-emerald-100 text-emerald-800 px-1 py-0.2 rounded">
+              <span className="text-[8px] sm:text-[9px] font-extrabold uppercase bg-emerald-100 text-emerald-800 px-1 py-0.2 rounded shrink-0">
                 Student
               </span>
             )}
           </div>
-          <span className="text-[10px] text-zinc-400 font-medium">{tierLabel}</span>
+          <span className="text-[9px] sm:text-[10px] text-zinc-400 font-medium truncate">{tierLabel}</span>
         </div>
 
         <ChevronDown
