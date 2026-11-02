@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Plus, Trash2, Edit3, Check, X, Palette, MessageCircle, Send, Sparkles, Loader2, Image as ImageIcon, Camera, MoreVertical, CheckCircle2, Mic, MicOff, Pencil, Eraser, ArrowLeft, Wand2, Bold, Type, Minus, Underline, Hand, Maximize, StickyNote, Download, Upload, Bell } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { GoogleGenAI } from "@google/genai";
@@ -431,6 +431,17 @@ function NotesApp() {
   const [stagePos, setStagePos] = useState({ x: 0, y: 0 });
   const [panState, setPanState] = useState<{ lastX: number, lastY: number, isPanning: boolean } | null>(null);
 
+  // In-app non-blocking Toast notification state (replaces window.alert for iframe compatibility)
+  const [toast, setToast] = useState<{ id: string; message: string; type: 'info' | 'warning' | 'error' | 'success' } | null>(null);
+
+  const showToast = useCallback((message: string, type: 'info' | 'warning' | 'error' | 'success' = 'info') => {
+    const id = `${Date.now()}_${Math.random()}`;
+    setToast({ id, message, type });
+    setTimeout(() => {
+      setToast((prev) => (prev?.id === id ? null : prev));
+    }, 4500);
+  }, []);
+
   // Voice state
   const [isRecording, setIsRecording] = useState(false);
   const [liveInterimText, setLiveInterimText] = useState('');
@@ -696,12 +707,14 @@ function NotesApp() {
   };
 
   const saveAsTemplate = (note: Note) => {
-    const name = prompt("Enter a name for this template:");
-    if (!name) return;
+    const summary = getNoteSummary(note);
+    const templateName = summary && summary !== 'Untitled Note'
+      ? summary
+      : `Template ${templates.length + 1}`;
 
     const newTemplate: Template = {
       id: crypto.randomUUID(),
-      name,
+      name: templateName,
       content: note.content,
       color: note.color,
       pattern: note.pattern,
@@ -709,9 +722,10 @@ function NotesApp() {
       image: note.image,
       fontSize: note.fontSize,
     };
-    setTemplates([...templates, newTemplate]);
+    setTemplates(prev => [...prev, newTemplate]);
     setOpenMenuId(null);
     setIsEditorMenuOpen(false);
+    showToast(`Template "${templateName}" saved!`, 'success');
   };
 
   const applyTemplate = (template: Template) => {
@@ -793,7 +807,7 @@ function NotesApp() {
   const startRecognitionSession = (target: 'chat' | 'note') => {
     const SpeechRecognitionClass = getSpeechRecognitionClass();
     if (!SpeechRecognitionClass) {
-      alert("Voice recognition is not supported in this browser. Please try Chrome, Edge, or Safari on iOS/Mac.");
+      showToast("Voice recognition is not supported in this browser. Please try Chrome, Edge, or Safari.", "warning");
       shouldKeepRecordingRef.current = false;
       setIsRecording(false);
       return;
@@ -941,7 +955,7 @@ function NotesApp() {
         liveInterimRef.current = '';
         setMicPermissionStatus('denied');
         setMicErrorMessage('Microphone access blocked');
-        alert("Microphone access is blocked.\n\nPlease check browser permissions in the address bar and allow microphone access.");
+        showToast("Microphone access is blocked. Please allow microphone permissions in your browser.", "error");
         return;
       }
       if (err === 'audio-capture') {
@@ -949,7 +963,7 @@ function NotesApp() {
         setIsRecording(false);
         setLiveInterimText('');
         liveInterimRef.current = '';
-        alert("No microphone found. Please connect an audio input device.");
+        showToast("No microphone found. Please connect an audio input device.", "warning");
         return;
       }
     };
@@ -1024,8 +1038,8 @@ function NotesApp() {
   const startVoiceRecording = async (target: 'chat' | 'note' = 'note', e?: React.MouseEvent) => {
     e?.stopPropagation();
 
-    // Voice dictation is strictly scoped to an open note editor
-    if (!activeNoteId) {
+    // Voice dictation for notes requires an open note editor
+    if (target === 'note' && !activeNoteId) {
       return;
     }
 
@@ -1037,34 +1051,38 @@ function NotesApp() {
 
     const SpeechRecognitionClass = getSpeechRecognitionClass();
     if (!SpeechRecognitionClass) {
-      alert("Voice recognition is not supported in this browser. Please try Chrome, Edge, or Safari.");
+      showToast("Voice recognition is not supported in this browser. Please try Chrome, Edge, or Safari.", "warning");
       return;
     }
 
     if (micPermissionStatus === 'denied') {
       const granted = await requestMicrophoneAccessFallback();
       if (!granted) {
-        alert("Microphone access is blocked.\n\nIMPORTANT:\n1. Tap the Lock icon 🔒 in the address bar.\n2. Set 'Microphone' to ALLOW.\n3. Refresh and try again.");
+        showToast("Microphone access is blocked. Please allow microphone access in your browser settings.", "error");
         return;
       }
     }
 
-    // Set baseline strings for note
-    if (editorRef.current) {
-      const interimEl = editorRef.current.querySelector('#voice-interim-text');
-      if (interimEl) interimEl.remove();
-      committedNoteHtmlRef.current = editorRef.current.innerHTML;
+    // Set baseline strings for target
+    if (target === 'chat') {
+      committedChatPrefixRef.current = chatInput;
     } else {
-      committedNoteHtmlRef.current = editContent;
+      if (editorRef.current) {
+        const interimEl = editorRef.current.querySelector('#voice-interim-text');
+        if (interimEl) interimEl.remove();
+        committedNoteHtmlRef.current = editorRef.current.innerHTML;
+      } else {
+        committedNoteHtmlRef.current = editContent;
+      }
     }
 
     shouldKeepRecordingRef.current = true;
-    currentTargetRef.current = 'note';
+    currentTargetRef.current = target;
     setLiveInterimText('');
     liveInterimRef.current = '';
 
     // Directly trigger inside user gesture (vital for mobile browsers & Safari)
-    startRecognitionSession('note');
+    startRecognitionSession(target);
   };
 
   const deleteNote = (id: string, e?: React.MouseEvent) => {
@@ -1101,9 +1119,9 @@ function NotesApp() {
           const data = JSON.parse(re.target?.result as string);
           if (data.notes) setNotes(data.notes);
           if (data.templates) setTemplates(data.templates);
-          alert("Storage restored successfully!");
+          showToast("Storage restored successfully!", "success");
         } catch (err) {
-          alert("Invalid backup file.");
+          showToast("Invalid backup file. Could not restore notes.", "error");
         }
       };
       reader.readAsText(file);
@@ -1448,7 +1466,7 @@ function NotesApp() {
       } catch {
         if (ai) {
           const response = await ai.models.generateContent({
-            model: "gemini-2.5-flash",
+            model: "gemini-3.8-flash",
             contents: prompt,
           });
           aiText = response.text || '';
@@ -1743,7 +1761,7 @@ function NotesApp() {
       } catch {
         if (ai) {
           const response = await ai.models.generateContent({
-            model: "gemini-2.5-flash",
+            model: "gemini-3.8-flash",
             contents: prompt,
           });
           aiResponse = response.text || "I'm sorry, I couldn't process that.";
@@ -2787,6 +2805,19 @@ function NotesApp() {
                             className="flex-1 bg-white/10 border border-white/10 rounded-xl md:rounded-2xl px-3.5 sm:px-5 py-2.5 sm:py-3.5 text-sm md:text-[15px] text-white placeholder:text-white/40 focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-medium min-h-[44px]"
                           />
                           <button
+                            type="button"
+                            onClick={(e) => startVoiceRecording('chat', e)}
+                            className={`min-w-[44px] min-h-[44px] p-2.5 rounded-xl md:rounded-2xl transition-all flex items-center justify-center shrink-0 ${
+                              isRecording && currentTargetRef.current === 'chat'
+                                ? 'bg-rose-500 text-white animate-pulse shadow-lg'
+                                : 'bg-white/10 hover:bg-white/20 text-white/70 hover:text-white'
+                            }`}
+                            title={isRecording && currentTargetRef.current === 'chat' ? 'Stop recording' : 'Voice input'}
+                            aria-label="Voice input for chat"
+                          >
+                            {isRecording && currentTargetRef.current === 'chat' ? <MicOff size={16} /> : <Mic size={16} />}
+                          </button>
+                          <button
                             onClick={handleSendMessage}
                             disabled={isLoading || !chatInput.trim()}
                             className="min-w-[44px] min-h-[44px] px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-white/10 text-white rounded-xl md:rounded-2xl font-black uppercase tracking-wider text-xs disabled:opacity-30 disabled:cursor-not-allowed transition-all active:scale-95 flex items-center justify-center gap-1.5 shadow-lg shrink-0"
@@ -2946,6 +2977,39 @@ function NotesApp() {
 
       {/* PWA Offline Connectivity Indicator */}
       <OfflineIndicator />
+
+      {/* Non-blocking Floating In-App Toast */}
+      <AnimatePresence>
+        {toast && (
+          <motion.div
+            key={toast.id}
+            initial={{ opacity: 0, y: 30, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 20, scale: 0.95 }}
+            transition={{ duration: 0.2 }}
+            className="fixed bottom-6 right-6 z-[9999] max-w-sm sm:max-w-md bg-white rounded-2xl shadow-xl border border-zinc-200 p-3.5 flex items-start gap-3 pointer-events-auto font-sans"
+            role="status"
+          >
+            <div className={`w-2.5 h-2.5 rounded-full mt-1.5 shrink-0 ${
+              toast.type === 'error' ? 'bg-rose-500' :
+              toast.type === 'warning' ? 'bg-amber-500' :
+              toast.type === 'success' ? 'bg-emerald-500' :
+              'bg-indigo-500'
+            }`} />
+            <p className="text-xs font-medium text-zinc-800 flex-1 leading-relaxed">
+              {toast.message}
+            </p>
+            <button
+              type="button"
+              onClick={() => setToast(null)}
+              className="text-zinc-400 hover:text-zinc-600 p-1 rounded-md text-xs shrink-0"
+              aria-label="Dismiss notice"
+            >
+              ✕
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <style>{`
         .note-content b, .note-content strong { font-weight: 700; }

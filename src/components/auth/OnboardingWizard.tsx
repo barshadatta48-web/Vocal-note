@@ -58,7 +58,7 @@ export const OnboardingWizard: React.FC = () => {
   const { user, completeOnboarding } = useAuth();
 
   const [step, setStep] = useState<1 | 2 | 3>(1);
-  const [name, setName] = useState(user?.name || 'Barsha Datta');
+  const [name, setName] = useState(user?.name || '');
   const [role, setRole] = useState(user?.role || 'Product Designer');
   const [customRole, setCustomRole] = useState('');
   
@@ -71,7 +71,7 @@ export const OnboardingWizard: React.FC = () => {
 
   const handleFinish = () => {
     const data: OnboardingData = {
-      name: name.trim() || user?.name || 'Barsha Datta',
+      name: name.trim() || user?.name || 'Creator',
       role: customRole.trim() || role || 'Product Designer',
       avatar: autoAvatar,
       useCase,
@@ -198,9 +198,11 @@ export const OnboardingWizard: React.FC = () => {
                     </div>
                     <input
                       type="text"
+                      name="fullName"
+                      autoComplete="off"
                       value={name}
                       onChange={(e) => setName(e.target.value)}
-                      placeholder="e.g. Barsha Datta"
+                      placeholder="e.g. Alex Rivera"
                       className="w-full min-h-[46px] pl-10 pr-4 py-2.5 rounded-xl bg-slate-50/80 border border-slate-200 focus:border-teal-500 focus:ring-2 focus:ring-teal-200 text-slate-800 text-sm focus:outline-none transition-all"
                     />
                   </div>

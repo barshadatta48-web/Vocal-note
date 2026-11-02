@@ -168,7 +168,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (typeof window !== 'undefined') {
       try {
         const stored = localStorage.getItem(STORAGE_KEY_DRAFT_PROFILE);
-        return stored ? JSON.parse(stored) : null;
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (parsed && (parsed.name === 'Barsha Datta' || !parsed.name)) {
+            localStorage.removeItem(STORAGE_KEY_DRAFT_PROFILE);
+            return null;
+          }
+          return parsed;
+        }
+        return null;
       } catch {
         return null;
       }
@@ -327,7 +335,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.removeItem(STORAGE_KEY_USER);
     localStorage.removeItem(STORAGE_KEY_ONBOARDED);
     localStorage.removeItem(STORAGE_KEY_REMEMBER);
+    localStorage.removeItem(STORAGE_KEY_DRAFT_PROFILE);
+    localStorage.removeItem(STORAGE_KEY_PROFILE_DONE);
 
+    setDraftProfile(null);
+    setHasCompletedProfileSetup(false);
     setUser(null);
     setSession(null);
     setAuthStatus('unauthenticated');
@@ -493,7 +505,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const token = `vocal_sess_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
     const expiresAt = Date.now() + 24 * 60 * 60 * 1000;
     const cleanEmail = email.trim().toLowerCase();
-    const cleanName = name.trim() || draftProfile?.name || 'New Creator';
+    const cleanName = name.trim() || 'New Creator';
 
     const isStudentEmail = /@(.*\.)?(edu|ac\.in|edu\.in|ac\.uk|edu\.au|edu\.sg|school|uni)/i.test(cleanEmail);
 
@@ -642,7 +654,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.removeItem(STORAGE_KEY_USER);
     localStorage.removeItem(STORAGE_KEY_ONBOARDED);
     localStorage.removeItem(STORAGE_KEY_REMEMBER);
+    localStorage.removeItem(STORAGE_KEY_DRAFT_PROFILE);
+    localStorage.removeItem(STORAGE_KEY_PROFILE_DONE);
 
+    setDraftProfile(null);
+    setHasCompletedProfileSetup(false);
     setUser(null);
     setSession(null);
     setAuthStatus('unauthenticated');

@@ -60,7 +60,7 @@ export const OnboardingFlow: React.FC = () => {
   const { navigate } = useAppRouter();
 
   const [step, setStep] = useState<1 | 2 | 3>(1);
-  const [name, setName] = useState(user?.name || 'Barsha Datta');
+  const [name, setName] = useState(user?.name || '');
   const [role, setRole] = useState(user?.role || ROLES[0]);
   const [customRole, setCustomRole] = useState('');
   
@@ -70,7 +70,7 @@ export const OnboardingFlow: React.FC = () => {
 
   const handleFinish = () => {
     const data: OnboardingData = {
-      name: name.trim() || 'Barsha Datta',
+      name: name.trim() || user?.name || 'Creator',
       role: customRole.trim() || role || 'Product Designer',
       avatar: user?.avatar || generateInitialsAvatar(name.trim() || user?.name || 'User'),
       useCase,
@@ -161,9 +161,11 @@ export const OnboardingFlow: React.FC = () => {
                     </label>
                     <input
                       type="text"
+                      name="fullName"
+                      autoComplete="off"
                       value={name}
                       onChange={(e) => setName(e.target.value)}
-                      placeholder="e.g. Barsha Datta"
+                      placeholder="e.g. Alex Rivera"
                       className="w-full min-h-[48px] px-3.5 rounded-xl bg-white border border-zinc-200 focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 text-sm text-zinc-900 placeholder:text-zinc-400 outline-none transition-all"
                     />
                   </div>

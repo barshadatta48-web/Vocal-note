@@ -62,7 +62,6 @@ export const StudentVerificationModal: React.FC = () => {
   const [customInstitution, setCustomInstitution] = useState('');
   const [emailOtpSent, setEmailOtpSent] = useState(false);
   const [otpCode, setOtpCode] = useState('');
-  const [simulatedDemoCode, setSimulatedDemoCode] = useState<string | null>(null);
   const [isSubmittingEmail, setIsSubmittingEmail] = useState(false);
   const [emailError, setEmailError] = useState<string | null>(null);
   const [isVerifyingOtp, setIsVerifyingOtp] = useState(false);
@@ -101,9 +100,6 @@ export const StudentVerificationModal: React.FC = () => {
       setEmailError(res.message);
     } else {
       setEmailOtpSent(true);
-      if (res.generatedOtp) {
-        setSimulatedDemoCode(res.generatedOtp);
-      }
     }
   };
 
@@ -122,14 +118,6 @@ export const StudentVerificationModal: React.FC = () => {
 
     if (!res.success) {
       setEmailError(res.message);
-    }
-  };
-
-  // Quick fill test code
-  const handleFillDemoCode = () => {
-    if (simulatedDemoCode) {
-      setOtpCode(simulatedDemoCode);
-      setEmailError(null);
     }
   };
 
@@ -338,49 +326,7 @@ export const StudentVerificationModal: React.FC = () => {
             )}
           </div>
 
-          {/* Quick Verification Demo Control Bar (To test Pending/Reject/Approve states) */}
-          <div className="p-3 bg-zinc-50 rounded-xl border border-zinc-200/60 flex items-center justify-between flex-wrap gap-2 text-xs">
-            <span className="text-[11px] font-medium text-zinc-500 flex items-center gap-1.5">
-              <Sparkles size={13} className="text-emerald-600" />
-              <span>Simulate Status for Testing:</span>
-            </span>
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <button
-                type="button"
-                onClick={() =>
-                  setStudentVerificationStatus('verified', {
-                    institution_name: selectedInstitution,
-                    student_email: studentEmail || 'student@university.edu',
-                  })
-                }
-                className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-emerald-100 hover:bg-emerald-200 text-emerald-800 transition-colors"
-              >
-                Simulate Verified
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  setStudentVerificationStatus('pending', {
-                    institution_name: selectedInstitution,
-                  })
-                }
-                className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-amber-100 hover:bg-amber-200 text-amber-800 transition-colors"
-              >
-                Simulate Pending
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  setStudentVerificationStatus('rejected', {
-                    institution_name: selectedInstitution,
-                  })
-                }
-                className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-rose-100 hover:bg-rose-200 text-rose-800 transition-colors"
-              >
-                Simulate Rejected
-              </button>
-            </div>
-          </div>
+
 
           {/* Verification Method Switcher */}
           <div>
@@ -553,15 +499,6 @@ export const StudentVerificationModal: React.FC = () => {
                         Please enter the 6-digit code below to instantly confirm your student enrollment.
                       </p>
                     </div>
-                    {simulatedDemoCode && (
-                      <button
-                        type="button"
-                        onClick={handleFillDemoCode}
-                        className="px-2.5 py-1 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-[10px] font-bold shrink-0 transition-colors"
-                      >
-                        Fill Code ({simulatedDemoCode})
-                      </button>
-                    )}
                   </div>
 
                   <div>

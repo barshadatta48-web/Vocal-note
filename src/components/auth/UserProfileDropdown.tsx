@@ -329,21 +329,7 @@ export const UserProfileDropdown: React.FC = () => {
                 <span>Replay Welcome Experience</span>
               </button>
 
-              <div className="h-px bg-zinc-100 my-1" />
 
-              {/* Edge Case Test: Simulate 401 Expiry */}
-              <button
-                type="button"
-                onClick={() => {
-                  setIsOpen(false);
-                  expireSession('Session expired (401 Unauthorized test). Please log in again.');
-                }}
-                className="w-full min-h-[38px] px-3 rounded-lg text-[11px] font-medium text-amber-700 hover:bg-amber-50 transition-colors flex items-center gap-2 text-left"
-                title="Test 401/403 session expiration and redirect guard"
-              >
-                <AlertTriangle size={13} className="text-amber-500" />
-                <span>Simulate 401 Expiry</span>
-              </button>
 
               <button
                 type="button"

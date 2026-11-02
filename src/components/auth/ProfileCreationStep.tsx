@@ -28,7 +28,7 @@ export const ProfileCreationStep: React.FC<ProfileCreationStepProps> = ({
   onComplete,
   onAlreadyHaveAccount,
 }) => {
-  const [name, setName] = useState(initialData?.name || 'Barsha Datta');
+  const [name, setName] = useState(initialData?.name || '');
   const [selectedRole, setSelectedRole] = useState(initialData?.role || ROLES[0].label);
   const [useCase, setUseCase] = useState(initialData?.useCase || USE_CASES[0].label);
   const [error, setError] = useState('');
@@ -124,12 +124,14 @@ export const ProfileCreationStep: React.FC<ProfileCreationStepProps> = ({
               <div className="relative">
                 <input
                   type="text"
+                  name="fullName"
+                  autoComplete="off"
                   value={name}
                   onChange={(e) => {
                     setName(e.target.value);
                     if (error) setError('');
                   }}
-                  placeholder="e.g. Barsha Datta"
+                  placeholder="e.g. Alex Rivera"
                   className={`w-full min-h-[48px] px-4 rounded-xl bg-zinc-50 border ${
                     error ? 'border-rose-400 focus:ring-1 focus:ring-rose-400' : 'border-zinc-200 focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900'
                   } text-sm text-zinc-900 placeholder:text-zinc-400 outline-none transition-all`}

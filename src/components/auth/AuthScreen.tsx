@@ -18,7 +18,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   const { navigate } = useAppRouter();
 
   const [mode, setMode] = useState<'login' | 'signup'>(initialMode);
-  const [name, setName] = useState(draftProfile?.name || '');
+  const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(true);
@@ -31,16 +31,12 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     setMode(initialMode);
   }, [initialMode]);
 
-  // If draftProfile updates, sync name
-  useEffect(() => {
-    if (draftProfile?.name && !name) {
-      setName(draftProfile.name);
-    }
-  }, [draftProfile, name]);
-
   const switchMode = (newMode: 'login' | 'signup') => {
     setMode(newMode);
     setErrors({});
+    if (newMode === 'signup') {
+      setName('');
+    }
     navigate(newMode === 'signup' ? '/signup' : '/login');
   };
 
@@ -175,11 +171,13 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
             <div className="mb-5 p-3 rounded-2xl bg-zinc-50 border border-zinc-200/80 flex items-center gap-3">
               <img
                 src={draftProfile.avatar}
-                alt={draftProfile.name}
+                alt={name.trim() || draftProfile.name || 'User'}
                 className="w-10 h-10 rounded-xl object-cover ring-1 ring-zinc-200"
               />
               <div className="min-w-0 flex-1">
-                <div className="text-xs font-bold text-zinc-900 truncate">{draftProfile.name}</div>
+                <div className="text-xs font-bold text-zinc-900 truncate">
+                  {name.trim() || draftProfile.name || 'Your Profile'}
+                </div>
                 <div className="text-[11px] text-zinc-500 truncate">{draftProfile.role}</div>
               </div>
               <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-md">
@@ -260,9 +258,16 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                 </label>
                 <input
                   type="text"
+                  name="fullName"
+                  autoComplete="off"
                   value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. Barsha Datta"
+                  onChange={(e) => {
+                    setName(e.target.value);
+                    if (errors.name) {
+                      setErrors((prev) => ({ ...prev, name: undefined }));
+                    }
+                  }}
+                  placeholder="e.g. Alex Rivera"
                   className={`w-full min-h-[48px] px-3.5 rounded-xl bg-white border ${
                     errors.name ? 'border-rose-400 focus:ring-1 focus:ring-rose-400' : 'border-zinc-200 focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900'
                   } text-sm text-zinc-900 placeholder:text-zinc-400 outline-none transition-all`}
