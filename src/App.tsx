@@ -9,7 +9,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { GoogleGenAI } from "@google/genai";
 
 import { Stage, Layer, Group, Line as KonvaLine } from 'react-konva';
-import { postProcessSpeechTranscript, aiPostProcessSpeech } from './speechPostProcessor';
+import { postProcessSpeechTranscript, aiPostProcessSpeech, detectVoiceCommand, VoiceCommand } from './speechPostProcessor';
 import { loadOfflineSnapshot, saveOfflineSnapshot } from './offlineStorage';
 import { PWAInstallButton } from './PWAInstallButton';
 import { OfflineIndicator } from './OfflineIndicator';
@@ -380,6 +380,58 @@ function isCaretAtStartOfNode(container: Node, offset: number, rootNode: Node): 
   return false;
 }
 
+function executeLineBreak(editor: HTMLElement, isParagraph: boolean = false): string {
+  editor.focus();
+  const sel = window.getSelection();
+  let executed = false;
+
+  if (sel && sel.rangeCount > 0 && editor.contains(sel.getRangeAt(0).commonAncestorContainer)) {
+    const range = sel.getRangeAt(0);
+    range.deleteContents();
+
+    const br = document.createElement('br');
+    range.insertNode(br);
+
+    if (isParagraph) {
+      const br2 = document.createElement('br');
+      br.parentNode?.insertBefore(br2, br.nextSibling);
+    }
+
+    const nextTarget = isParagraph ? (br.nextSibling || br) : br;
+    const isAtEnd = isCaretAtEndOfNode(nextTarget, 0, editor);
+    if (isAtEnd && nextTarget.parentNode) {
+      const trailingBr = document.createElement('br');
+      nextTarget.parentNode.appendChild(trailingBr);
+    }
+
+    const newRange = document.createRange();
+    newRange.setStartAfter(nextTarget);
+    newRange.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(newRange);
+    executed = true;
+  }
+
+  if (!executed) {
+    editor.appendChild(document.createElement('br'));
+    if (isParagraph) {
+      editor.appendChild(document.createElement('br'));
+    }
+    const trailingBr = document.createElement('br');
+    editor.appendChild(trailingBr);
+
+    const newRange = document.createRange();
+    newRange.setStartBefore(trailingBr);
+    newRange.collapse(true);
+    sel?.removeAllRanges();
+    sel?.addRange(newRange);
+  }
+
+  normalizeEditorUnderlines(editor);
+  editor.scrollTop = editor.scrollHeight;
+  return editor.innerHTML;
+}
+
 function insertHtmlAtCursor(editor: HTMLElement, htmlSnippet: string): string {
   editor.focus();
   const sel = window.getSelection();
@@ -396,7 +448,7 @@ function insertHtmlAtCursor(editor: HTMLElement, htmlSnippet: string): string {
         !/\s$/.test(preText) && 
         !htmlSnippet.startsWith('<br>') && 
         !/^[.,!?:;]/.test(htmlSnippet);
-      const snippetWithSpace = (needsSpace ? ' ' : '') + htmlSnippet + ' ';
+      const snippetWithSpace = (needsSpace ? ' ' : '') + htmlSnippet;
 
       range.deleteContents();
       const tempDiv = document.createElement('div');
@@ -427,7 +479,7 @@ function insertHtmlAtCursor(editor: HTMLElement, htmlSnippet: string): string {
       !curContent.endsWith(' ') && 
       !htmlSnippet.startsWith('<br>') && 
       !/^[.,!?:;]/.test(htmlSnippet);
-    tempDiv.innerHTML = (needsSpace ? ' ' : '') + htmlSnippet + ' ';
+    tempDiv.innerHTML = (needsSpace ? ' ' : '') + htmlSnippet;
     while (tempDiv.firstChild) {
       editor.appendChild(tempDiv.firstChild);
     }
@@ -520,6 +572,8 @@ function NotesApp() {
   const currentSessionIdRef = useRef<number>(0);
   const processedFinalTranscriptsRef = useRef<Set<string>>(new Set());
   const lastFinalUtteranceRef = useRef<{ text: string; time: number }>({ text: '', time: 0 });
+  const lastDictatedSnapshotRef = useRef<{ text: string; htmlBefore: string } | null>(null);
+  const lastDictatedPhraseRef = useRef<string>('');
 
   // Drawing state
   const [isDrawing, setIsDrawing] = useState(false);
@@ -954,12 +1008,170 @@ function NotesApp() {
       }
     };
 
+    const executeVoiceCommand = (command: VoiceCommand, targetMode: 'note' | 'chat'): boolean => {
+      if (command === 'STOP_LISTENING') {
+        stopVoiceRecording();
+        showToast("Voice dictation stopped", "info");
+        return true;
+      }
+
+      if (command === 'START_LISTENING') {
+        if (!isRecording && !shouldKeepRecordingRef.current) {
+          startVoiceRecording(targetMode);
+        }
+        return true;
+      }
+
+      if (targetMode === 'chat') {
+        if (command === 'NEW_LINE') {
+          setChatInput(prev => {
+            const next = (committedChatPrefixRef.current || prev) + '\n';
+            committedChatPrefixRef.current = next;
+            return next.slice(0, MAX_CHARS);
+          });
+          return true;
+        }
+        if (command === 'NEW_PARAGRAPH') {
+          setChatInput(prev => {
+            const next = (committedChatPrefixRef.current || prev) + '\n\n';
+            committedChatPrefixRef.current = next;
+            return next.slice(0, MAX_CHARS);
+          });
+          return true;
+        }
+        if (command === 'DELETE_THAT') {
+          if (lastDictatedPhraseRef.current) {
+            setChatInput(prev => {
+              const phrase = lastDictatedPhraseRef.current;
+              let next = prev;
+              if (next.endsWith(phrase)) {
+                next = next.slice(0, -phrase.length).trimEnd();
+              }
+              committedChatPrefixRef.current = next;
+              return next;
+            });
+            lastDictatedPhraseRef.current = '';
+            showToast("Deleted last phrase", "info");
+          }
+          return true;
+        }
+        return false;
+      }
+
+      // targetMode === 'note'
+      if (command === 'NEW_LINE') {
+        if (editorRef.current) {
+          const nextHtml = executeLineBreak(editorRef.current, false);
+          setEditContent(nextHtml);
+          committedNoteHtmlRef.current = nextHtml;
+          if (activeNoteId) {
+            setNotes(prev => prev.map(n => n.id === activeNoteId ? { ...n, content: nextHtml, updatedAt: Date.now() } : n));
+          }
+        } else {
+          setEditContent(prev => (prev + '<br>').slice(0, MAX_CHARS));
+        }
+        return true;
+      }
+
+      if (command === 'NEW_PARAGRAPH') {
+        if (editorRef.current) {
+          const nextHtml = executeLineBreak(editorRef.current, true);
+          setEditContent(nextHtml);
+          committedNoteHtmlRef.current = nextHtml;
+          if (activeNoteId) {
+            setNotes(prev => prev.map(n => n.id === activeNoteId ? { ...n, content: nextHtml, updatedAt: Date.now() } : n));
+          }
+        } else {
+          setEditContent(prev => (prev + '<br><br>').slice(0, MAX_CHARS));
+        }
+        return true;
+      }
+
+      if (command === 'DELETE_THAT') {
+        if (lastDictatedSnapshotRef.current && editorRef.current) {
+          const restored = lastDictatedSnapshotRef.current.htmlBefore;
+          editorRef.current.innerHTML = restored;
+          normalizeEditorUnderlines(editorRef.current);
+          const sel = window.getSelection();
+          const range = document.createRange();
+          range.selectNodeContents(editorRef.current);
+          range.collapse(false);
+          sel?.removeAllRanges();
+          sel?.addRange(range);
+
+          setEditContent(restored);
+          committedNoteHtmlRef.current = restored;
+          if (activeNoteId) {
+            setNotes(prev => prev.map(n => n.id === activeNoteId ? { ...n, content: restored, updatedAt: Date.now() } : n));
+          }
+          lastDictatedSnapshotRef.current = null;
+          showToast("Deleted last phrase", "info");
+          return true;
+        }
+        return false;
+      }
+
+      return false;
+    };
+
+    const handleInsertFinalText = (rawText: string, targetMode: 'note' | 'chat') => {
+      const trimmed = rawText.trim();
+      if (!trimmed) return;
+
+      if (targetMode === 'chat') {
+        const cleanFinal = postProcessSpeechTranscript(trimmed, false);
+        lastDictatedPhraseRef.current = cleanFinal;
+        setChatInput(prev => {
+          const base = committedChatPrefixRef.current || prev;
+          const needsSpace = base.length > 0 && 
+            !base.endsWith(' ') && 
+            !base.endsWith('\n') && 
+            !cleanFinal.startsWith('\n') && 
+            !/^[.,!?:;]/.test(cleanFinal);
+          const next = base + (needsSpace ? ' ' : '') + cleanFinal;
+          committedChatPrefixRef.current = next;
+          return next.slice(0, MAX_CHARS);
+        });
+      } else {
+        const isHtml = true;
+        const cleanFinal = postProcessSpeechTranscript(trimmed, isHtml);
+        const formattedHtml = cleanFinal.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
+
+        if (editorRef.current) {
+          lastDictatedSnapshotRef.current = {
+            text: formattedHtml,
+            htmlBefore: editorRef.current.innerHTML
+          };
+          const nextHtml = insertHtmlAtCursor(editorRef.current, formattedHtml);
+          setEditContent(nextHtml);
+          committedNoteHtmlRef.current = nextHtml;
+          if (activeNoteId) {
+            setNotes(prev => prev.map(n => n.id === activeNoteId ? { ...n, content: nextHtml, updatedAt: Date.now() } : n));
+          }
+        } else {
+          setEditContent(prev => {
+            const needsSpace = prev.length > 0 && 
+              !prev.endsWith('<br>') && 
+              !prev.endsWith(' ') && 
+              !cleanFinal.startsWith('<br>') && 
+              !/^[.,!?:;]/.test(cleanFinal);
+            const spacer = needsSpace ? ' ' : '';
+            const next = (prev + spacer + formattedHtml).slice(0, MAX_CHARS);
+            committedNoteHtmlRef.current = next;
+            if (activeNoteId) {
+              setNotes(notesPrev => notesPrev.map(n => n.id === activeNoteId ? { ...n, content: next, updatedAt: Date.now() } : n));
+            }
+            return next;
+          });
+        }
+      }
+    };
+
     recognition.onresult = (event: any) => {
       if (currentSessionIdRef.current !== sessionId || !shouldKeepRecordingRef.current) {
         return;
       }
 
-      let newFinalText = '';
       let interimTranscript = '';
 
       for (let i = event.resultIndex; i < event.results.length; ++i) {
@@ -979,6 +1191,34 @@ function NotesApp() {
             const isRecentDuplicate = last.text === normalized && (now - last.time < 5000);
 
             if (!isRecentDuplicate) {
+              lastFinalUtteranceRef.current = { text: normalized, time: now };
+
+              // Check if utterance is a voice command
+              const cmdResult = detectVoiceCommand(transcript);
+
+              if (cmdResult.isPureCommand && cmdResult.command) {
+                // Execute standalone command directly (e.g. "Next line", "Next paragraph", "Delete that", "Stop listening")
+                executeVoiceCommand(cmdResult.command, target);
+                setLiveInterimText('');
+                liveInterimRef.current = '';
+                continue;
+              }
+
+              if (cmdResult.segments && cmdResult.segments.length > 0) {
+                // Utterance with mixed text and command(s)
+                for (const seg of cmdResult.segments) {
+                  if (seg.type === 'command' && seg.command) {
+                    executeVoiceCommand(seg.command, target);
+                  } else if (seg.type === 'text' && seg.content) {
+                    handleInsertFinalText(seg.content, target);
+                  }
+                }
+                setLiveInterimText('');
+                liveInterimRef.current = '';
+                continue;
+              }
+
+              // Normal text utterance: handle suffix delta if cumulative
               let chunkToAdd = transcript;
               if (last.text && normalized.startsWith(last.text) && normalized.length > last.text.length) {
                 const prevWords = last.text.split(/\s+/).length;
@@ -989,8 +1229,9 @@ function NotesApp() {
                 }
               }
 
-              lastFinalUtteranceRef.current = { text: normalized, time: now };
-              newFinalText += (newFinalText ? ' ' : '') + chunkToAdd;
+              handleInsertFinalText(chunkToAdd, target);
+              setLiveInterimText('');
+              liveInterimRef.current = '';
             }
           }
         } else {
@@ -1002,60 +1243,11 @@ function NotesApp() {
       setLiveInterimText(cleanInterim);
       liveInterimRef.current = cleanInterim;
 
-      if (target === 'chat') {
-        if (newFinalText.trim()) {
-          const cleanFinal = postProcessSpeechTranscript(newFinalText.trim(), false);
-          setChatInput(prev => {
-            const base = committedChatPrefixRef.current || prev;
-            const needsSpace = base.length > 0 && 
-              !base.endsWith(' ') && 
-              !base.endsWith('\n') && 
-              !cleanFinal.startsWith('\n') && 
-              !/^[.,!?:;]/.test(cleanFinal);
-            const next = base + (needsSpace ? ' ' : '') + cleanFinal;
-            committedChatPrefixRef.current = next;
-            return next.slice(0, MAX_CHARS);
-          });
-          setLiveInterimText('');
-          liveInterimRef.current = '';
-        } else if (cleanInterim) {
-          const base = committedChatPrefixRef.current;
-          const needsSpace = base.length > 0 && !base.endsWith(' ') && !base.endsWith('\n');
-          const preview = base + (needsSpace ? ' ' : '') + cleanInterim;
-          setChatInput(preview.slice(0, MAX_CHARS));
-        }
-      } else {
-        if (newFinalText.trim()) {
-          const isHtml = true;
-          const cleanFinal = postProcessSpeechTranscript(newFinalText.trim(), isHtml);
-          const formattedHtml = cleanFinal.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
-
-          if (editorRef.current) {
-            const nextHtml = insertHtmlAtCursor(editorRef.current, formattedHtml);
-            setEditContent(nextHtml);
-            committedNoteHtmlRef.current = nextHtml;
-            if (activeNoteId) {
-              setNotes(prev => prev.map(n => n.id === activeNoteId ? { ...n, content: nextHtml, updatedAt: Date.now() } : n));
-            }
-          } else {
-            setEditContent(prev => {
-              const needsSpace = prev.length > 0 && 
-                !prev.endsWith('<br>') && 
-                !prev.endsWith(' ') && 
-                !cleanFinal.startsWith('<br>') && 
-                !/^[.,!?:;]/.test(cleanFinal);
-              const spacer = needsSpace ? ' ' : '';
-              const next = (prev + spacer + formattedHtml).slice(0, MAX_CHARS);
-              committedNoteHtmlRef.current = next;
-              if (activeNoteId) {
-                setNotes(notesPrev => notesPrev.map(n => n.id === activeNoteId ? { ...n, content: next, updatedAt: Date.now() } : n));
-              }
-              return next;
-            });
-          }
-          setLiveInterimText('');
-          liveInterimRef.current = '';
-        }
+      if (target === 'chat' && cleanInterim) {
+        const base = committedChatPrefixRef.current;
+        const needsSpace = base.length > 0 && !base.endsWith(' ') && !base.endsWith('\n');
+        const preview = base + (needsSpace ? ' ' : '') + cleanInterim;
+        setChatInput(preview.slice(0, MAX_CHARS));
       }
     };
 
@@ -1973,7 +2165,7 @@ function NotesApp() {
         className="hidden"
       />
 
-      <header className="fixed top-0 left-0 right-0 z-[100] px-2.5 sm:px-4 md:px-[50px] py-2.5 sm:py-3 md:py-[20px] flex items-center justify-between bg-premium-header shadow-sm overflow-visible min-h-[62px] md:min-h-0">
+      <header className="fixed top-0 left-0 right-0 z-[100] px-3 sm:px-4 md:px-[50px] py-3 sm:py-3.5 md:py-[20px] flex items-center justify-between bg-premium-header shadow-sm overflow-visible min-h-[68px] sm:min-h-[72px] md:min-h-0">
         {/* Subtle Rainbow Detail */}
         <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 opacity-20" />
         
@@ -1983,12 +2175,12 @@ function NotesApp() {
             <div className="absolute -inset-2 bg-teal-500/10 rounded-full blur-xl group-hover:bg-teal-500/20 transition-all duration-700" />
             
             {/* Note Shape with Folded Corner */}
-            <div className="relative w-9 h-9 sm:w-11 sm:h-11 md:w-14 md:h-14 bg-white border-2 border-teal-500/20 rounded-xl md:rounded-2xl shadow-sm flex items-center justify-center overflow-hidden">
+            <div className="relative w-10 h-10 sm:w-11 sm:h-11 md:w-14 md:h-14 bg-white border-2 border-teal-500/20 rounded-xl md:rounded-2xl shadow-sm flex items-center justify-center overflow-hidden">
               {/* Folded Corner Mimic */}
               <div className="absolute top-0 right-0 w-2.5 h-2.5 sm:w-3.5 sm:h-3.5 md:w-5 md:h-5 bg-gradient-to-br from-orange-100 to-orange-400 rounded-bl-lg md:rounded-bl-xl shadow-inner border-l border-b border-orange-500/20" />
               
               {/* Note Icon inside Note */}
-              <StickyNote className="text-teal-600 mt-0.5 sm:mt-1" size={isMobile ? 20 : 28} />
+              <StickyNote className="text-teal-600 mt-0.5 sm:mt-1" size={isMobile ? 22 : 28} />
               
               {/* Bottom Gloss */}
               <div className="absolute bottom-0 left-0 right-0 h-1/2 bg-gradient-to-t from-teal-50/50 to-transparent" />
@@ -2009,24 +2201,24 @@ function NotesApp() {
           </div>
         </div>
         
-        <div className="flex items-center gap-1 sm:gap-1.5 md:gap-3 shrink-0">
+        <div className="flex items-center gap-1.5 sm:gap-2 md:gap-3 shrink-0">
           {/* View Mode Toggle - Icon only on mobile */}
           <div className="flex items-center bg-black/5 rounded-xl md:rounded-2xl p-0.5 md:p-1 border border-black/5">
              <button
               onClick={() => setViewMode('grid')}
-              className={`min-w-[34px] min-h-[34px] sm:min-w-[38px] sm:min-h-[38px] p-1.5 sm:p-2 md:px-4 md:py-2 rounded-lg md:rounded-xl leading-none transition-all flex items-center justify-center ${viewMode === 'grid' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+              className={`min-w-[38px] min-h-[38px] sm:min-w-[42px] sm:min-h-[42px] p-2 md:px-4 md:py-2 rounded-lg md:rounded-xl leading-none transition-all flex items-center justify-center active:scale-95 ${viewMode === 'grid' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
               title="Grid View"
             >
               <span className="hidden md:inline text-[10px] font-black uppercase tracking-widest">Grid</span>
-              <Maximize size={16} className="md:hidden" />
+              <Maximize size={17} className="md:hidden" />
             </button>
             <button
               onClick={() => setViewMode('board')}
-              className={`min-w-[34px] min-h-[34px] sm:min-w-[38px] sm:min-h-[38px] p-1.5 sm:p-2 md:px-4 md:py-2 rounded-lg md:rounded-xl leading-none transition-all flex items-center justify-center ${viewMode === 'board' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+              className={`min-w-[38px] min-h-[38px] sm:min-w-[42px] sm:min-h-[42px] p-2 md:px-4 md:py-2 rounded-lg md:rounded-xl leading-none transition-all flex items-center justify-center active:scale-95 ${viewMode === 'board' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
               title="Board View"
             >
               <span className="hidden md:inline text-[10px] font-black uppercase tracking-widest">Board</span>
-              <Hand size={16} className="md:hidden" />
+              <Hand size={17} className="md:hidden" />
             </button>
           </div>
 
@@ -2039,11 +2231,11 @@ function NotesApp() {
               const nextIndex = (currentIndex + 1) % DASHBOARD_COLORS.length;
               setDashboardColor(DASHBOARD_COLORS[nextIndex].value);
             }}
-            className="min-w-[34px] min-h-[34px] sm:min-w-[38px] sm:min-h-[38px] p-1.5 sm:p-2 md:px-4 md:py-2.5 bg-black/5 rounded-xl md:rounded-2xl border border-black/5 hover:bg-black/10 transition-all group/palette flex items-center justify-center gap-1.5 sm:gap-2"
+            className="min-w-[38px] min-h-[38px] sm:min-w-[42px] sm:min-h-[42px] p-2 sm:p-2.5 md:px-4 md:py-2.5 bg-black/5 rounded-xl md:rounded-2xl border border-black/5 hover:bg-black/10 transition-all group/palette flex items-center justify-center gap-1.5 sm:gap-2 active:scale-95"
             title="Cycle Dashboard Theme"
           >
             <div 
-              className="w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-5 md:h-5 rounded-full border-2 border-white shadow-sm transition-transform group-hover/palette:rotate-180 duration-500 shrink-0"
+              className="w-4 h-4 sm:w-4.5 sm:h-4.5 md:w-5 md:h-5 rounded-full border-2 border-white shadow-sm transition-transform group-hover/palette:rotate-180 duration-500 shrink-0"
               style={{ backgroundColor: dashboardColor }}
             />
             <div className="hidden md:flex flex-col items-start leading-none text-left">
@@ -2052,7 +2244,7 @@ function NotesApp() {
                 {DASHBOARD_COLORS.find(c => c.value === dashboardColor)?.name || 'Custom'}
               </span>
             </div>
-            <Palette size={16} className={`hidden md:block ${dashboardColor === '#1a1c1e' ? 'text-indigo-400' : 'text-indigo-600'}`} />
+            <Palette size={17} className={`hidden md:block ${dashboardColor === '#1a1c1e' ? 'text-indigo-400' : 'text-indigo-600'}`} />
           </button>
 
           <div className="hidden md:block h-4 w-px bg-black/10 mx-1" />
@@ -2094,11 +2286,11 @@ function NotesApp() {
                 setIsNotificationOpen(!isNotificationOpen);
                 setShowStartupReminder(false);
               }}
-              className="relative min-w-[34px] min-h-[34px] sm:min-w-[38px] sm:min-h-[38px] p-1.5 sm:p-2 md:p-3 rounded-xl md:rounded-2xl transition-all hover:bg-black/5 text-slate-500 hover:text-slate-800 flex items-center justify-center"
+              className="relative min-w-[38px] min-h-[38px] sm:min-w-[42px] sm:min-h-[42px] p-2 sm:p-2.5 md:p-3 rounded-xl md:rounded-2xl transition-all hover:bg-black/5 text-slate-500 hover:text-slate-800 flex items-center justify-center active:scale-95"
               title={unfinishedCount > 0 ? `${unfinishedCount} Unfinished Notes` : "Notifications"}
               aria-label="Unfinished Notes Notification"
             >
-              <Bell size={18} className={`md:w-5 md:h-5 ${unfinishedCount > 0 ? "text-slate-700" : "text-slate-400"}`} />
+              <Bell size={19} className={`md:w-5 md:h-5 ${unfinishedCount > 0 ? "text-slate-700" : "text-slate-400"}`} />
               {unfinishedCount > 0 && (
                 <span className="absolute -top-1 -right-1 min-w-[17px] sm:min-w-[19px] h-[17px] sm:h-[19px] px-1 flex items-center justify-center text-[9px] sm:text-[10px] font-black text-white bg-rose-500 rounded-full shadow-md border-2 border-white">
                   {unfinishedCount > 99 ? '99+' : unfinishedCount}
@@ -2454,88 +2646,88 @@ function NotesApp() {
             className="fixed inset-0 z-[200] bg-white flex flex-col"
           >
             {/* Editor Header */}
-            <header className="px-2.5 sm:px-4 md:px-6 py-2 sm:py-3 flex items-center justify-between border-b border-black/5 bg-white/80 backdrop-blur-xl shrink-0 min-h-[58px] sm:min-h-[64px] relative z-[100] gap-2 overflow-x-auto no-scrollbar">
-              <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
+            <header className="px-3 sm:px-4 md:px-6 py-2.5 sm:py-3.5 flex items-center justify-between border-b border-black/5 bg-white/90 backdrop-blur-xl shrink-0 min-h-[66px] sm:min-h-[72px] relative z-[100] gap-2.5 overflow-x-auto no-scrollbar touch-pan-x">
+              <div className="flex items-center gap-2 sm:gap-3 shrink-0">
                 <button 
                   onClick={saveNote}
-                  className="min-w-[36px] min-h-[36px] sm:min-w-[40px] sm:min-h-[40px] p-2 hover:bg-black/5 rounded-full transition-colors text-slate-600 flex items-center justify-center active:scale-95"
+                  className="min-w-[40px] min-h-[40px] sm:min-w-[44px] sm:min-h-[44px] p-2 hover:bg-black/5 rounded-full transition-colors text-slate-600 flex items-center justify-center active:scale-95"
                   title="Back & Save"
                   aria-label="Back"
                 >
-                  <ArrowLeft size={18} className="sm:w-5 sm:h-5" />
+                  <ArrowLeft size={20} className="sm:w-[22px] sm:h-[22px]" />
                 </button>
-                <div className={`px-2 sm:px-3 py-1 rounded-full text-[8px] sm:text-[10px] font-black uppercase tracking-wider ${notes.find(n => n.id === activeNoteId)?.color} bg-opacity-40 border border-black/5 shadow-sm shrink-0`}>
+                <div className={`px-2.5 sm:px-3.5 py-1.5 rounded-full text-[9px] sm:text-[10px] font-black uppercase tracking-wider ${notes.find(n => n.id === activeNoteId)?.color} bg-opacity-40 border border-black/5 shadow-sm shrink-0`}>
                   <span className="hidden xs:inline">{isDrawing ? 'Sketch Mode' : 'Write Mode'}</span>
                   <span className="xs:hidden">{isDrawing ? 'Sketch' : 'Write'}</span>
                 </div>
               </div>
 
-              <div className="flex items-center gap-1 sm:gap-1.5 md:gap-2 shrink-0">
+              <div className="flex items-center gap-1.5 sm:gap-2 md:gap-2.5 shrink-0">
                 {/* Repositioned Sketch Tools: undo, redo, pen, eraser, pan, color swatches, clear, reset zoom */}
                 {isDrawing && activeNoteId && (
-                  <div className="flex items-center gap-1 sm:gap-1.5 bg-black/5 p-1 rounded-xl sm:rounded-2xl border border-black/5 shrink-0 touch-pan-x">
+                  <div className="flex items-center gap-1 sm:gap-1.5 bg-black/5 p-1 sm:p-1.5 rounded-xl sm:rounded-2xl border border-black/5 shrink-0 touch-pan-x">
                     {/* Undo Stroke */}
                     <button
                       onClick={undoDrawing}
                       disabled={drawingHistory.length === 0}
-                      className={`min-w-[32px] min-h-[32px] sm:min-w-[36px] sm:min-h-[36px] p-1.5 sm:p-2 rounded-lg sm:rounded-xl transition-all flex items-center justify-center active:scale-95 ${
+                      className={`min-w-[34px] min-h-[34px] sm:min-w-[38px] sm:min-h-[38px] p-2 rounded-lg sm:rounded-xl transition-all flex items-center justify-center active:scale-95 ${
                         drawingHistory.length === 0 ? 'opacity-30 cursor-not-allowed text-slate-400' : 'hover:bg-black/10 text-slate-700'
                       }`}
                       title="Undo Stroke"
                       aria-label="Undo Stroke"
                     >
-                      <RotateCcw size={15} className="sm:w-4 sm:h-4" />
+                      <RotateCcw size={16} className="sm:w-4.5 sm:h-4.5" />
                     </button>
 
                     {/* Redo Stroke */}
                     <button
                       onClick={redoDrawing}
                       disabled={drawingRedoStack.length === 0}
-                      className={`min-w-[32px] min-h-[32px] sm:min-w-[36px] sm:min-h-[36px] p-1.5 sm:p-2 rounded-lg sm:rounded-xl transition-all flex items-center justify-center active:scale-95 ${
+                      className={`min-w-[34px] min-h-[34px] sm:min-w-[38px] sm:min-h-[38px] p-2 rounded-lg sm:rounded-xl transition-all flex items-center justify-center active:scale-95 ${
                         drawingRedoStack.length === 0 ? 'opacity-30 cursor-not-allowed text-slate-400' : 'hover:bg-black/10 text-slate-700'
                       }`}
                       title="Redo Stroke"
                       aria-label="Redo Stroke"
                     >
-                      <RotateCw size={15} className="sm:w-4 sm:h-4" />
+                      <RotateCw size={16} className="sm:w-4.5 sm:h-4.5" />
                     </button>
 
                     <div className="w-px h-5 bg-black/10 mx-0.5" />
 
                     <button
                       onClick={() => setDrawTool('pen')}
-                      className={`min-w-[32px] min-h-[32px] sm:min-w-[36px] sm:min-h-[36px] p-1.5 sm:p-2 rounded-lg sm:rounded-xl transition-all flex items-center justify-center active:scale-95 ${drawTool === 'pen' ? 'bg-black text-white shadow-sm' : 'hover:bg-black/10 text-slate-700'}`}
+                      className={`min-w-[34px] min-h-[34px] sm:min-w-[38px] sm:min-h-[38px] p-2 rounded-lg sm:rounded-xl transition-all flex items-center justify-center active:scale-95 ${drawTool === 'pen' ? 'bg-black text-white shadow-sm' : 'hover:bg-black/10 text-slate-700'}`}
                       title="Pen Tool"
                       aria-label="Pen Tool"
                     >
-                      <Pencil size={15} className="sm:w-4 sm:h-4" />
+                      <Pencil size={16} className="sm:w-4.5 sm:h-4.5" />
                     </button>
                     <button
                       onClick={() => setDrawTool('eraser')}
-                      className={`min-w-[32px] min-h-[32px] sm:min-w-[36px] sm:min-h-[36px] p-1.5 sm:p-2 rounded-lg sm:rounded-xl transition-all flex items-center justify-center active:scale-95 ${drawTool === 'eraser' ? 'bg-black text-white shadow-sm' : 'hover:bg-black/10 text-slate-700'}`}
+                      className={`min-w-[34px] min-h-[34px] sm:min-w-[38px] sm:min-h-[38px] p-2 rounded-lg sm:rounded-xl transition-all flex items-center justify-center active:scale-95 ${drawTool === 'eraser' ? 'bg-black text-white shadow-sm' : 'hover:bg-black/10 text-slate-700'}`}
                       title="Eraser Tool"
                       aria-label="Eraser Tool"
                     >
-                      <Eraser size={15} className="sm:w-4 sm:h-4" />
+                      <Eraser size={16} className="sm:w-4.5 sm:h-4.5" />
                     </button>
                     <button
                       onClick={() => setDrawTool('pan')}
-                      className={`min-w-[32px] min-h-[32px] sm:min-w-[36px] sm:min-h-[36px] p-1.5 sm:p-2 rounded-lg sm:rounded-xl transition-all flex items-center justify-center active:scale-95 ${drawTool === 'pan' ? 'bg-black text-white shadow-sm' : 'hover:bg-black/10 text-slate-700'}`}
+                      className={`min-w-[34px] min-h-[34px] sm:min-w-[38px] sm:min-h-[38px] p-2 rounded-lg sm:rounded-xl transition-all flex items-center justify-center active:scale-95 ${drawTool === 'pan' ? 'bg-black text-white shadow-sm' : 'hover:bg-black/10 text-slate-700'}`}
                       title="Move Drawing (Drag strokes with finger/mouse)"
                       aria-label="Pan Tool"
                     >
-                      <Hand size={15} className="sm:w-4 sm:h-4" />
+                      <Hand size={16} className="sm:w-4.5 sm:h-4.5" />
                     </button>
 
                     <div className="w-px h-5 bg-black/10 mx-0.5" />
 
                     {/* Color Swatches */}
-                    <div className="flex items-center gap-1 px-0.5">
+                    <div className="flex items-center gap-1.5 px-0.5">
                       {['#000000', '#ef4444', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6'].map(c => (
                         <button
                           key={c}
                           onClick={() => { setDrawColor(c); setDrawTool('pen'); }}
-                          className={`w-5 h-5 sm:w-6 sm:h-6 shrink-0 rounded-full border border-black/10 transition-all hover:scale-110 active:scale-95 ${drawColor === c && drawTool === 'pen' ? 'ring-2 ring-black ring-offset-1 scale-105' : ''}`}
+                          className={`w-6 h-6 sm:w-6.5 sm:h-6.5 shrink-0 rounded-full border border-black/10 transition-all hover:scale-110 active:scale-95 ${drawColor === c && drawTool === 'pen' ? 'ring-2 ring-black ring-offset-1 scale-105' : ''}`}
                           style={{ backgroundColor: c }}
                           aria-label={`Color ${c}`}
                         />
@@ -2547,22 +2739,22 @@ function NotesApp() {
                     {/* Clear Canvas */}
                     <button
                       onClick={(e) => clearDrawing(activeNoteId, e)}
-                      className="min-w-[30px] min-h-[30px] px-1.5 sm:px-2 py-1 rounded-lg sm:rounded-xl hover:bg-orange-50 text-slate-600 hover:text-orange-600 transition-all flex items-center justify-center gap-1 text-[11px] font-bold active:scale-95"
+                      className="min-w-[32px] min-h-[32px] sm:min-w-[36px] sm:min-h-[36px] px-2 py-1.5 rounded-lg sm:rounded-xl hover:bg-orange-50 text-slate-600 hover:text-orange-600 transition-all flex items-center justify-center gap-1 text-[11px] font-bold active:scale-95"
                       title="Clear Canvas"
                       aria-label="Clear Canvas"
                     >
-                      <Trash2 size={14} className="sm:w-4 sm:h-4" />
+                      <Trash2 size={15} className="sm:w-4 sm:h-4" />
                       <span className="hidden xl:inline">Clear</span>
                     </button>
 
                     {/* Reset Zoom */}
                     <button
                       onClick={() => { setStageScale(1); setStagePos({ x: 0, y: 0 }); }}
-                      className="min-w-[30px] min-h-[30px] p-1.5 rounded-lg sm:rounded-xl hover:bg-black/10 text-slate-500 transition-all flex items-center justify-center active:scale-95"
+                      className="min-w-[32px] min-h-[32px] sm:min-w-[36px] sm:min-h-[36px] p-2 rounded-lg sm:rounded-xl hover:bg-black/10 text-slate-500 transition-all flex items-center justify-center active:scale-95"
                       title="Reset Zoom"
                       aria-label="Reset Zoom"
                     >
-                      <Maximize size={14} className="sm:w-4 sm:h-4" />
+                      <Maximize size={15} className="sm:w-4 sm:h-4" />
                     </button>
                   </div>
                 )}
@@ -2570,11 +2762,11 @@ function NotesApp() {
                 {/* Pencil / Sketch Mode Switcher */}
                 <button
                   onClick={() => setIsDrawing(!isDrawing)}
-                  className={`min-w-[36px] min-h-[36px] sm:min-w-[40px] sm:min-h-[40px] p-2 sm:p-2.5 rounded-xl sm:rounded-2xl transition-all flex items-center justify-center active:scale-95 shrink-0 ${isDrawing ? 'bg-purple-600 text-white shadow-md' : 'bg-black/5 hover:bg-black/10 text-slate-700'}`}
+                  className={`min-w-[40px] min-h-[40px] sm:min-w-[44px] sm:min-h-[44px] p-2 sm:p-2.5 rounded-xl sm:rounded-2xl transition-all flex items-center justify-center active:scale-95 shrink-0 ${isDrawing ? 'bg-purple-600 text-white shadow-md' : 'bg-black/5 hover:bg-black/10 text-slate-700'}`}
                   title={isDrawing ? "Switch to Writing Mode" : "Switch to Sketch Mode"}
                   aria-label={isDrawing ? "Writing Mode" : "Sketch Mode"}
                 >
-                  <Pencil size={17} className="sm:w-5 sm:h-5" />
+                  <Pencil size={18} className="sm:w-5 sm:h-5" />
                 </button>
 
                 {/* Voice Dictation Button */}
@@ -2587,7 +2779,7 @@ function NotesApp() {
                       startVoiceRecording('note', e);
                     }
                   }}
-                  className={`min-w-[36px] min-h-[36px] sm:min-w-[40px] sm:min-h-[40px] px-2 sm:px-3 py-1.5 sm:py-2 rounded-xl sm:rounded-2xl transition-all flex items-center justify-center gap-1.5 active:scale-95 font-bold text-xs shrink-0 ${
+                  className={`min-w-[40px] min-h-[40px] sm:min-w-[44px] sm:min-h-[44px] px-2.5 sm:px-3.5 py-2 rounded-xl sm:rounded-2xl transition-all flex items-center justify-center gap-1.5 active:scale-95 font-bold text-xs shrink-0 ${
                     isRecording 
                       ? 'bg-red-500 text-white shadow-lg animate-pulse ring-2 ring-red-400' 
                       : micPermissionStatus === 'denied'
@@ -2598,9 +2790,9 @@ function NotesApp() {
                   aria-label="Voice Dictation"
                 >
                   {micPermissionStatus === 'denied' ? (
-                    <MicOff size={16} className="sm:w-[18px] sm:h-[18px] text-red-500" />
+                    <MicOff size={18} className="sm:w-5 sm:h-5 text-red-500" />
                   ) : (
-                    <Mic size={16} className={`sm:w-[18px] sm:h-[18px] ${isRecording ? 'text-white' : 'text-rose-600'}`} />
+                    <Mic size={18} className={`sm:w-5 sm:h-5 ${isRecording ? 'text-white' : 'text-rose-600'}`} />
                   )}
                   <span className="hidden xs:inline text-[11px] font-black uppercase tracking-wider">
                     {isRecording ? 'Listening...' : 'Dictate'}
@@ -2610,25 +2802,25 @@ function NotesApp() {
                 {/* Attach Photo Button */}
                 <button
                   onClick={(e) => triggerGallery(activeNoteId, e)}
-                  className="min-w-[34px] min-h-[34px] sm:min-w-[38px] sm:min-h-[38px] p-2 rounded-xl sm:rounded-2xl hover:bg-black/5 text-slate-500 hover:text-blue-500 transition-all flex items-center justify-center active:scale-95 shrink-0"
+                  className="min-w-[40px] min-h-[40px] sm:min-w-[44px] sm:min-h-[44px] p-2 sm:p-2.5 rounded-xl sm:rounded-2xl hover:bg-black/5 text-slate-500 hover:text-blue-500 transition-all flex items-center justify-center active:scale-95 shrink-0"
                   title="Attach Photo"
                   aria-label="Attach Photo"
                 >
-                  <ImageIcon size={17} className="sm:w-[19px] sm:h-[19px]" />
+                  <ImageIcon size={19} className="sm:w-5 sm:h-5" />
                 </button>
 
                 {/* Cycle Note Color Theme */}
                 <button
                   onClick={(e) => changeColor(activeNoteId!, e)}
-                  className="min-w-[34px] min-h-[34px] sm:min-w-[38px] sm:min-h-[38px] p-2 rounded-xl sm:rounded-2xl hover:bg-black/5 text-slate-500 hover:text-purple-600 transition-all flex items-center justify-center active:scale-95 shrink-0"
+                  className="min-w-[40px] min-h-[40px] sm:min-w-[44px] sm:min-h-[44px] p-2 sm:p-2.5 rounded-xl sm:rounded-2xl hover:bg-black/5 text-slate-500 hover:text-purple-600 transition-all flex items-center justify-center active:scale-95 shrink-0"
                   title="Cycle Note Color"
                   aria-label="Cycle Note Color"
                 >
-                  <Palette size={17} className="sm:w-[19px] sm:h-[19px]" />
+                  <Palette size={19} className="sm:w-5 sm:h-5" />
                 </button>
 
                 {/* Font Size Controls */}
-                <div className="flex items-center gap-0.5 bg-black/5 p-0.5 sm:p-1 rounded-xl sm:rounded-[20px] shrink-0">
+                <div className="flex items-center gap-0.5 sm:gap-1 bg-black/5 p-1 rounded-xl sm:rounded-[20px] shrink-0">
                   <button
                     onMouseDown={(e) => e.preventDefault()}
                     onTouchStart={(e) => e.preventDefault()}
@@ -2636,11 +2828,11 @@ function NotesApp() {
                       e.preventDefault();
                       setEditFontSize(prev => Math.max(12, prev - 4));
                     }}
-                    className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg sm:rounded-xl hover:bg-white text-slate-600 hover:text-black transition-all flex items-center justify-center font-bold active:scale-95 text-xs sm:text-sm"
+                    className="w-8 h-8 sm:w-[34px] sm:h-[34px] rounded-lg sm:rounded-xl hover:bg-white text-slate-600 hover:text-black transition-all flex items-center justify-center font-bold active:scale-95 text-xs sm:text-sm"
                     title="Smaller text"
                     aria-label="Smaller text"
                   >
-                    <Minus size={13} className="sm:w-3.5 sm:h-3.5" />
+                    <Minus size={14} className="sm:w-4 sm:h-4" />
                   </button>
                   <div className="px-1 text-[10px] sm:text-xs font-bold text-slate-500 w-5 sm:w-6 text-center select-none">
                     {editFontSize}
@@ -2652,16 +2844,16 @@ function NotesApp() {
                       e.preventDefault();
                       setEditFontSize(prev => Math.min(120, prev + 4));
                     }}
-                    className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg sm:rounded-xl hover:bg-white text-slate-600 hover:text-black transition-all flex items-center justify-center font-bold active:scale-95 text-xs sm:text-sm"
+                    className="w-8 h-8 sm:w-[34px] sm:h-[34px] rounded-lg sm:rounded-xl hover:bg-white text-slate-600 hover:text-black transition-all flex items-center justify-center font-bold active:scale-95 text-xs sm:text-sm"
                     title="Larger text"
                     aria-label="Larger text"
                   >
-                    <Plus size={13} className="sm:w-3.5 sm:h-3.5" />
+                    <Plus size={14} className="sm:w-4 sm:h-4" />
                   </button>
                 </div>
 
                 {/* Bold & Underline Formatting Controls with touch/click preventDefault */}
-                <div className="flex items-center gap-0.5 sm:gap-1 shrink-0">
+                <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
                   <button
                     onMouseDown={(e) => e.preventDefault()}
                     onTouchStart={(e) => e.preventDefault()}
@@ -2669,13 +2861,13 @@ function NotesApp() {
                       e.preventDefault();
                       applyFormat('bold', e);
                     }}
-                    className={`min-w-[34px] min-h-[34px] sm:min-w-[38px] sm:min-h-[38px] p-2 sm:p-2.5 rounded-xl sm:rounded-2xl transition-all flex items-center justify-center active:scale-95 ${
+                    className={`min-w-[40px] min-h-[40px] sm:min-w-[44px] sm:min-h-[44px] p-2 sm:p-2.5 rounded-xl sm:rounded-2xl transition-all flex items-center justify-center active:scale-95 ${
                       isBold ? 'bg-black text-white shadow-sm' : 'bg-black/5 hover:bg-black/10 text-slate-700'
                     }`}
                     title="Bold"
                     aria-label="Bold"
                   >
-                    <Bold size={15} className="sm:w-[17px] sm:h-[17px]" />
+                    <Bold size={17} className="sm:w-[18px] sm:h-[18px]" />
                   </button>
 
                   <button
@@ -2685,13 +2877,13 @@ function NotesApp() {
                       e.preventDefault();
                       applyFormat('underline', e);
                     }}
-                    className={`min-w-[34px] min-h-[34px] sm:min-w-[38px] sm:min-h-[38px] p-2 sm:p-2.5 rounded-xl sm:rounded-2xl transition-all flex items-center justify-center active:scale-95 ${
+                    className={`min-w-[40px] min-h-[40px] sm:min-w-[44px] sm:min-h-[44px] p-2 sm:p-2.5 rounded-xl sm:rounded-2xl transition-all flex items-center justify-center active:scale-95 ${
                       isUnderline ? 'bg-black text-white shadow-sm' : 'bg-black/5 hover:bg-black/10 text-slate-700'
                     }`}
                     title="Underline"
                     aria-label="Underline"
                   >
-                    <Underline size={15} className="sm:w-[17px] sm:h-[17px]" />
+                    <Underline size={17} className="sm:w-[18px] sm:h-[18px]" />
                   </button>
                 </div>
 
@@ -2701,21 +2893,21 @@ function NotesApp() {
                     e.stopPropagation();
                     setIsChatOpen(!isChatOpen);
                   }}
-                  className={`min-w-[34px] min-h-[34px] sm:min-w-[38px] sm:min-h-[38px] p-2 sm:p-2.5 rounded-xl sm:rounded-2xl transition-all flex items-center justify-center active:scale-95 shrink-0 ${isChatOpen ? 'bg-blue-600 text-white shadow-md' : 'bg-black/5 hover:bg-blue-50 text-slate-600 hover:text-blue-600'}`}
+                  className={`min-w-[40px] min-h-[40px] sm:min-w-[44px] sm:min-h-[44px] p-2 sm:p-2.5 rounded-xl sm:rounded-2xl transition-all flex items-center justify-center active:scale-95 shrink-0 ${isChatOpen ? 'bg-blue-600 text-white shadow-md' : 'bg-black/5 hover:bg-blue-50 text-slate-600 hover:text-blue-600'}`}
                   title="AI Assistant Chat"
                   aria-label="AI Chat"
                 >
-                  <MessageCircle size={16} className="sm:w-[18px] sm:h-[18px]" />
+                  <MessageCircle size={18} className="sm:w-5 sm:h-5" />
                 </button>
 
                 {/* Delete Note Button */}
                 <button
                   onClick={(e) => deleteNote(activeNoteId!, e)}
-                  className="min-w-[34px] min-h-[34px] sm:min-w-[38px] sm:min-h-[38px] p-2 sm:p-2.5 rounded-xl sm:rounded-2xl hover:bg-red-50 text-slate-400 hover:text-red-500 transition-all flex items-center justify-center active:scale-95 shrink-0"
+                  className="min-w-[40px] min-h-[40px] sm:min-w-[44px] sm:min-h-[44px] p-2 sm:p-2.5 rounded-xl sm:rounded-2xl hover:bg-red-50 text-slate-400 hover:text-red-500 transition-all flex items-center justify-center active:scale-95 shrink-0"
                   title="Delete Note"
                   aria-label="Delete Note"
                 >
-                  <Trash2 size={16} className="sm:w-[18px] sm:h-[18px]" />
+                  <Trash2 size={18} className="sm:w-5 sm:h-5" />
                 </button>
 
                 <div className="hidden sm:block w-px h-6 bg-black/5 mx-0.5" />
@@ -2723,11 +2915,11 @@ function NotesApp() {
                 {/* Save & Close Button */}
                 <button
                   onClick={saveNote}
-                  className="min-w-[34px] min-h-[34px] sm:min-w-[38px] sm:min-h-[38px] p-2 sm:p-2.5 bg-black text-white rounded-xl sm:rounded-2xl hover:bg-slate-800 transition-all shadow-md flex items-center justify-center active:scale-95 shrink-0"
+                  className="min-w-[40px] min-h-[40px] sm:min-w-[44px] sm:min-h-[44px] p-2 sm:p-2.5 bg-black text-white rounded-xl sm:rounded-2xl hover:bg-slate-800 transition-all shadow-md flex items-center justify-center active:scale-95 shrink-0"
                   title="Save & Close"
                   aria-label="Save and Close"
                 >
-                  <CheckCircle2 size={17} className="sm:w-[19px] sm:h-[19px]" />
+                  <CheckCircle2 size={19} className="sm:w-5 sm:h-5" />
                 </button>
               </div>
             </header>
@@ -2754,7 +2946,7 @@ function NotesApp() {
                         </span>
                       ) : (
                         <span className="text-slate-300 text-xs">
-                          Real-time dictation active. Say <span className="text-white font-semibold">"bold [words]"</span>, <span className="text-white font-semibold">"underline [words]"</span>, <span className="text-white font-semibold">"period"</span>, <span className="text-white font-semibold">"new line"</span>
+                          Voice active. Say <span className="text-white font-semibold">"next line"</span>, <span className="text-white font-semibold">"next paragraph"</span>, <span className="text-white font-semibold">"delete that"</span>, <span className="text-white font-semibold">"stop listening"</span>, or <span className="text-white font-semibold">"bold [words]"</span>
                         </span>
                       )}
                       <button

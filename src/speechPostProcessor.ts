@@ -60,6 +60,87 @@ export function applyTextFormattingCommands(text: string): string {
   return res;
 }
 
+export type VoiceCommand = 
+  | 'NEW_LINE' 
+  | 'NEW_PARAGRAPH' 
+  | 'DELETE_THAT' 
+  | 'STOP_LISTENING' 
+  | 'START_LISTENING';
+
+export interface CommandDetectionResult {
+  isPureCommand: boolean;
+  command?: VoiceCommand;
+  segments?: Array<{ type: 'text' | 'command'; content?: string; command?: VoiceCommand }>;
+}
+
+/**
+ * Detects voice commands from finalized speech recognition results.
+ * Supports variations in case, punctuation, and whitespace.
+ * Prevents false positives in ordinary speech (e.g. "the next line of code").
+ */
+export function detectVoiceCommand(rawTranscript: string): CommandDetectionResult {
+  if (!rawTranscript) return { isPureCommand: false };
+
+  const normalized = rawTranscript.toLowerCase().replace(/[.,!?;:]/g, '').replace(/\s+/g, ' ').trim();
+
+  // 1. Check direct standalone command (case-insensitive, punctuation-stripped)
+  if (normalized === 'next line' || normalized === 'new line') {
+    return { isPureCommand: true, command: 'NEW_LINE' };
+  }
+  if (normalized === 'next paragraph' || normalized === 'new paragraph') {
+    return { isPureCommand: true, command: 'NEW_PARAGRAPH' };
+  }
+  if (normalized === 'delete that' || normalized === 'scratch that' || normalized === 'undo that' || normalized === 'delete last' || normalized === 'delete last word') {
+    return { isPureCommand: true, command: 'DELETE_THAT' };
+  }
+  if (normalized === 'stop listening' || normalized === 'stop recording' || normalized === 'stop dictation' || normalized === 'stop mic' || normalized === 'stop microphone') {
+    return { isPureCommand: true, command: 'STOP_LISTENING' };
+  }
+  if (normalized === 'start listening' || normalized === 'start recording' || normalized === 'start dictation') {
+    return { isPureCommand: true, command: 'START_LISTENING' };
+  }
+
+  // 2. Check if utterance contains discrete voice commands bounded by punctuation, pause, or clause boundary
+  // Negative lookahead prevents matching inside ordinary sentences like "the next line of" or "next linear"
+  const commandPattern = /\b(next\s+paragraph|new\s+paragraph|next\s+line|new\s+line|delete\s+that|scratch\s+that|stop\s+listening|stop\s+recording)(?!\s+(?:of|in|from|on|was|is|were|are|that|which|to))\b/i;
+  
+  if (!commandPattern.test(rawTranscript)) {
+    return { isPureCommand: false };
+  }
+
+  const segments: Array<{ type: 'text' | 'command'; content?: string; command?: VoiceCommand }> = [];
+  const regex = /\b(next\s+paragraph|new\s+paragraph|next\s+line|new\s+line|delete\s+that|scratch\s+that|stop\s+listening|stop\s+recording)(?!\s+(?:of|in|from|on|was|is|were|are|that|which|to))\b/gi;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = regex.exec(rawTranscript)) !== null) {
+    const textBefore = rawTranscript.slice(lastIndex, match.index).trim();
+    if (textBefore) {
+      segments.push({ type: 'text', content: textBefore });
+    }
+
+    const matchedCmd = match[1].toLowerCase().replace(/\s+/g, ' ');
+    let cmdType: VoiceCommand = 'NEW_LINE';
+    if (matchedCmd === 'next paragraph' || matchedCmd === 'new paragraph') {
+      cmdType = 'NEW_PARAGRAPH';
+    } else if (matchedCmd === 'delete that' || matchedCmd === 'scratch that') {
+      cmdType = 'DELETE_THAT';
+    } else if (matchedCmd === 'stop listening' || matchedCmd === 'stop recording') {
+      cmdType = 'STOP_LISTENING';
+    }
+
+    segments.push({ type: 'command', command: cmdType });
+    lastIndex = match.index + match[0].length;
+  }
+
+  const trailingText = rawTranscript.slice(lastIndex).trim();
+  if (trailingText) {
+    segments.push({ type: 'text', content: trailingText });
+  }
+
+  return { isPureCommand: false, segments };
+}
+
 /**
  * Real-time synchronous dictionary-based speech-to-text post-processor.
  * Converts punctuation commands, formats bold/underline, and ensures proper spacing and capitalization.
@@ -75,7 +156,9 @@ export function postProcessSpeechTranscript(text: string, isHtml: boolean = fals
   processed = processed.replace(/\bfull\s+stop\b/gi, '.');
   processed = processed.replace(/\b(?:semi-colon|semi\s+colon|semicolon)\b/gi, ';');
 
-  // 2. Line break commands
+  // 2. Line break & paragraph commands
+  const paragraphBreakTag = isHtml ? '<br><br>' : '\n\n';
+  processed = processed.replace(/\s*\b(?:new\s+paragraph|next\s+paragraph)\b\s*/gi, paragraphBreakTag);
   const breakTag = isHtml ? '<br>' : '\n';
   processed = processed.replace(/\s*\b(?:new\s+line|next\s+line)\b\s*/gi, breakTag);
 
