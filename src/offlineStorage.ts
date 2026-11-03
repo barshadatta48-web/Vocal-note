@@ -94,20 +94,24 @@ function readLegacyStorage(): Snapshot | null {
 }
 
 export async function loadOfflineSnapshot(): Promise<Snapshot | null> {
-  // Preserve the original AI Studio/localStorage data as the first source of truth.
-  // This prevents an older IndexedDB snapshot from resurrecting notes that the user
-  // has already deleted or changed.
   const legacy = readLegacyStorage();
 
   try {
-    if (legacy) {
-      // Keep IndexedDB synchronized with the existing AI Studio storage.
-      await writeValue('snapshot', legacy);
+    const existing = await readValue<Snapshot>('snapshot');
+    const isExistingValid = isValidSnapshot(existing);
+
+    // If both exist, compare timestamps to ensure we never overwrite newer data with older data
+    if (legacy && isExistingValid) {
+      const existingTime = existing.savedAt || 0;
+      const legacyTime = legacy.savedAt || 0;
+      if (existingTime > legacyTime) {
+        return existing;
+      }
       return legacy;
     }
 
-    const existing = await readValue<Snapshot>('snapshot');
-    if (isValidSnapshot(existing)) return existing;
+    if (isExistingValid) return existing;
+    if (legacy) return legacy;
 
     return null;
   } catch (error) {

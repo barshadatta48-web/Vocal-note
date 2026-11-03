@@ -4,12 +4,13 @@
  */
 
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { Plus, Trash2, Edit3, Check, X, Palette, MessageCircle, Send, Sparkles, Loader2, Image as ImageIcon, Camera, MoreVertical, CheckCircle2, Mic, MicOff, Pencil, Eraser, ArrowLeft, Wand2, Bold, Type, Minus, Underline, Hand, Maximize, StickyNote, Download, Upload, Bell } from 'lucide-react';
+import { Plus, Trash2, Edit3, Check, X, Palette, MessageCircle, Send, Sparkles, Loader2, Image as ImageIcon, Camera, MoreVertical, CheckCircle2, Mic, MicOff, Pencil, Eraser, ArrowLeft, Wand2, Bold, Type, Minus, Underline, Hand, Maximize, StickyNote, Download, Upload, Bell, RotateCcw, RotateCw } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { GoogleGenAI } from "@google/genai";
 
-import { Stage, Layer, Line as KonvaLine } from 'react-konva';
+import { Stage, Layer, Group, Line as KonvaLine } from 'react-konva';
 import { postProcessSpeechTranscript, aiPostProcessSpeech } from './speechPostProcessor';
+import { loadOfflineSnapshot, saveOfflineSnapshot } from './offlineStorage';
 import { PWAInstallButton } from './PWAInstallButton';
 import { OfflineIndicator } from './OfflineIndicator';
 import { useAuth } from './context/AuthContext';
@@ -379,6 +380,69 @@ function isCaretAtStartOfNode(container: Node, offset: number, rootNode: Node): 
   return false;
 }
 
+function insertHtmlAtCursor(editor: HTMLElement, htmlSnippet: string): string {
+  editor.focus();
+  const sel = window.getSelection();
+  let inserted = false;
+
+  if (sel && sel.rangeCount > 0) {
+    const range = sel.getRangeAt(0);
+    if (editor.contains(range.commonAncestorContainer)) {
+      const preRange = range.cloneRange();
+      preRange.selectNodeContents(editor);
+      preRange.setEnd(range.startContainer, range.startOffset);
+      const preText = preRange.toString();
+      const needsSpace = preText.length > 0 && 
+        !/\s$/.test(preText) && 
+        !htmlSnippet.startsWith('<br>') && 
+        !/^[.,!?:;]/.test(htmlSnippet);
+      const snippetWithSpace = (needsSpace ? ' ' : '') + htmlSnippet + ' ';
+
+      range.deleteContents();
+      const tempDiv = document.createElement('div');
+      tempDiv.innerHTML = snippetWithSpace;
+      const frag = document.createDocumentFragment();
+      let node: Node | null;
+      let lastNode: Node | null = null;
+      while ((node = tempDiv.firstChild)) {
+        lastNode = frag.appendChild(node);
+      }
+      range.insertNode(frag);
+      if (lastNode) {
+        const newRange = document.createRange();
+        newRange.setStartAfter(lastNode);
+        newRange.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(newRange);
+      }
+      inserted = true;
+    }
+  }
+
+  if (!inserted) {
+    const tempDiv = document.createElement('div');
+    const curContent = editor.innerHTML;
+    const needsSpace = curContent.length > 0 && 
+      !curContent.endsWith('<br>') && 
+      !curContent.endsWith(' ') && 
+      !htmlSnippet.startsWith('<br>') && 
+      !/^[.,!?:;]/.test(htmlSnippet);
+    tempDiv.innerHTML = (needsSpace ? ' ' : '') + htmlSnippet + ' ';
+    while (tempDiv.firstChild) {
+      editor.appendChild(tempDiv.firstChild);
+    }
+    const newRange = document.createRange();
+    newRange.selectNodeContents(editor);
+    newRange.collapse(false);
+    sel?.removeAllRanges();
+    sel?.addRange(newRange);
+  }
+
+  normalizeEditorUnderlines(editor);
+  editor.scrollTop = editor.scrollHeight;
+  return editor.innerHTML;
+}
+
 function NotesApp() {
   const { user, triggerGatedFeature, openSubscriptionModal } = useAuth();
   const [notes, setNotes] = useState<Note[]>([]);
@@ -453,9 +517,14 @@ function NotesApp() {
   const committedNoteHtmlRef = useRef('');
   const liveInterimRef = useRef('');
   const finalizedIndexSetRef = useRef<Set<number>>(new Set());
+  const currentSessionIdRef = useRef<number>(0);
+  const processedFinalTranscriptsRef = useRef<Set<string>>(new Set());
+  const lastFinalUtteranceRef = useRef<{ text: string; time: number }>({ text: '', time: 0 });
 
   // Drawing state
   const [isDrawing, setIsDrawing] = useState(false);
+  const [drawingHistory, setDrawingHistory] = useState<DrawingLine[][]>([]);
+  const [drawingRedoStack, setDrawingRedoStack] = useState<DrawingLine[][]>([]);
   const drawingId = isDrawing ? activeNoteId : null;
   const editingId = !isDrawing ? activeNoteId : null;
   const isPointerDrawingRef = useRef(false);
@@ -511,32 +580,56 @@ function NotesApp() {
     }
   }, []);
 
-  // Load notes and templates from localStorage
+  // Load notes and templates from IndexedDB offline snapshot with localStorage fallback
   useEffect(() => {
-    const savedNotes = safeGetItem('stickie-notes-rainbow');
-    if (savedNotes) {
+    let isMounted = true;
+
+    async function hydrate() {
       try {
-        const parsed = JSON.parse(savedNotes);
-        if (Array.isArray(parsed)) {
-          // Clean out any legacy welcome note so user lands directly on clean dashboard / empty state
-          const cleaned = parsed.filter(n => !n.content?.includes('Welcome to Vocal Note!'));
-          setNotes(cleaned);
+        const snapshot = await loadOfflineSnapshot();
+        if (snapshot && isMounted) {
+          if (Array.isArray(snapshot.notes) && snapshot.notes.length > 0) {
+            const cleaned = (snapshot.notes as Note[]).filter(n => !n.content?.includes('Welcome to Vocal Note!'));
+            setNotes(cleaned);
+          }
+          if (Array.isArray(snapshot.templates) && snapshot.templates.length > 0) {
+            setTemplates(snapshot.templates as Template[]);
+          }
+        } else if (isMounted) {
+          const savedNotes = safeGetItem('stickie-notes-rainbow');
+          if (savedNotes) {
+            try {
+              const parsed = JSON.parse(savedNotes);
+              if (Array.isArray(parsed)) {
+                const cleaned = parsed.filter(n => !n.content?.includes('Welcome to Vocal Note!'));
+                setNotes(cleaned);
+              }
+            } catch (e) {
+              console.error('Failed to parse notes from local storage', e);
+            }
+          }
+          const savedTemplates = safeGetItem('stickie-templates-rainbow');
+          if (savedTemplates) {
+            try {
+              const parsedT = JSON.parse(savedTemplates);
+              if (Array.isArray(parsedT)) {
+                setTemplates(parsedT);
+              }
+            } catch (e) {
+              console.error('Failed to parse templates', e);
+            }
+          }
         }
       } catch (e) {
-        console.error('Failed to parse notes from local storage', e);
-      }
-    }
-    const savedTemplates = safeGetItem('stickie-templates-rainbow');
-    if (savedTemplates) {
-      try {
-        const parsedT = JSON.parse(savedTemplates);
-        if (Array.isArray(parsedT)) {
-          setTemplates(parsedT);
+        console.warn('Hydration from offline snapshot error:', e);
+      } finally {
+        if (isMounted) {
+          setIsStorageLoaded(true);
         }
-      } catch (e) {
-        console.error('Failed to parse templates', e);
       }
     }
+
+    hydrate();
 
     const savedViewMode = safeGetItem('rainbow-notepad-view-mode');
     if (savedViewMode === 'grid' || savedViewMode === 'board') {
@@ -547,38 +640,43 @@ function NotesApp() {
       setDashboardColor(savedColor);
     }
 
-    setIsStorageLoaded(true);
     safeSetItem('vocal-note-visited', 'true');
 
     // Check microphone permission status initially
     try {
       if (typeof navigator !== 'undefined' && navigator.permissions && navigator.permissions.query) {
         navigator.permissions.query({ name: 'microphone' as any }).then(result => {
-          setMicPermissionStatus(result.state);
+          if (isMounted) setMicPermissionStatus(result.state);
           result.onchange = () => {
-            setMicPermissionStatus(result.state);
+            if (isMounted) setMicPermissionStatus(result.state);
           };
         }).catch(err => {
           console.warn("Permissions API not fully supported for microphone query:", err);
-          setMicPermissionStatus('prompt');
+          if (isMounted) setMicPermissionStatus('prompt');
         });
       } else {
-        setMicPermissionStatus('prompt');
+        if (isMounted) setMicPermissionStatus('prompt');
       }
     } catch {
-      setMicPermissionStatus('prompt');
+      if (isMounted) setMicPermissionStatus('prompt');
     }
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
-  // Save to localStorage ONLY AFTER initial load has completed
+  // Save to localStorage and IndexedDB snapshot ONLY AFTER initial load has completed
   useEffect(() => {
     if (!isStorageLoaded) return;
     safeSetItem('stickie-notes-rainbow', JSON.stringify(notes));
+    saveOfflineSnapshot(notes, templates);
   }, [notes, isStorageLoaded]);
 
   useEffect(() => {
     if (!isStorageLoaded) return;
     safeSetItem('stickie-templates-rainbow', JSON.stringify(templates));
+    saveOfflineSnapshot(notes, templates);
   }, [templates, isStorageLoaded]);
 
   useEffect(() => {
@@ -773,6 +871,7 @@ function NotesApp() {
 
   const stopVoiceRecording = () => {
     shouldKeepRecordingRef.current = false;
+    currentSessionIdRef.current += 1;
     finalizedIndexSetRef.current = new Set();
     if (restartTimerRef.current) {
       clearTimeout(restartTimerRef.current);
@@ -780,6 +879,10 @@ function NotesApp() {
     }
     if (recognitionRef.current) {
       try {
+        recognitionRef.current.onstart = null;
+        recognitionRef.current.onresult = null;
+        recognitionRef.current.onerror = null;
+        recognitionRef.current.onend = null;
         if (typeof recognitionRef.current.abort === 'function') {
           recognitionRef.current.abort();
         } else if (typeof recognitionRef.current.stop === 'function') {
@@ -804,7 +907,11 @@ function NotesApp() {
     }
   };
 
-  const startRecognitionSession = (target: 'chat' | 'note') => {
+  const startRecognitionSession = (target: 'chat' | 'note', sessionId: number) => {
+    if (!shouldKeepRecordingRef.current || currentSessionIdRef.current !== sessionId) {
+      return;
+    }
+
     const SpeechRecognitionClass = getSpeechRecognitionClass();
     if (!SpeechRecognitionClass) {
       showToast("Voice recognition is not supported in this browser. Please try Chrome, Edge, or Safari.", "warning");
@@ -834,10 +941,13 @@ function NotesApp() {
     recognition.maxAlternatives = 1;
 
     recognition.onstart = () => {
+      if (currentSessionIdRef.current !== sessionId) {
+        try { recognition.abort(); } catch {}
+        return;
+      }
       setIsRecording(true);
       setMicPermissionStatus('granted');
       setMicErrorMessage(null);
-      finalizedIndexSetRef.current = new Set();
       if (target === 'chat') {
         setIsChatOpen(true);
         setIsHeaderMenuOpen(false);
@@ -845,21 +955,46 @@ function NotesApp() {
     };
 
     recognition.onresult = (event: any) => {
-      let finalChunk = '';
+      if (currentSessionIdRef.current !== sessionId || !shouldKeepRecordingRef.current) {
+        return;
+      }
+
+      let newFinalText = '';
       let interimTranscript = '';
 
-      // Cleanly separate final results from interim results and prevent duplicate replays
       for (let i = event.resultIndex; i < event.results.length; ++i) {
         const res = event.results[i];
+        const transcript = (res[0]?.transcript || '').trim();
+        if (!transcript) continue;
+
         if (res.isFinal) {
-          if (!finalizedIndexSetRef.current.has(i)) {
-            finalizedIndexSetRef.current.add(i);
-            const text = res[0]?.transcript || '';
-            finalChunk += (finalChunk ? ' ' : '') + text;
+          const normalized = transcript.toLowerCase().replace(/[.,!?;:]/g, '').replace(/\s+/g, ' ').trim();
+          const fingerprint = `${sessionId}_${i}_${normalized}`;
+
+          if (!processedFinalTranscriptsRef.current.has(fingerprint)) {
+            processedFinalTranscriptsRef.current.add(fingerprint);
+
+            const now = Date.now();
+            const last = lastFinalUtteranceRef.current;
+            const isRecentDuplicate = last.text === normalized && (now - last.time < 5000);
+
+            if (!isRecentDuplicate) {
+              let chunkToAdd = transcript;
+              if (last.text && normalized.startsWith(last.text) && normalized.length > last.text.length) {
+                const prevWords = last.text.split(/\s+/).length;
+                const allWords = transcript.split(/\s+/);
+                const deltaWords = allWords.slice(prevWords);
+                if (deltaWords.length > 0) {
+                  chunkToAdd = deltaWords.join(' ');
+                }
+              }
+
+              lastFinalUtteranceRef.current = { text: normalized, time: now };
+              newFinalText += (newFinalText ? ' ' : '') + chunkToAdd;
+            }
           }
         } else {
-          const text = res[0]?.transcript || '';
-          interimTranscript += text;
+          interimTranscript += (interimTranscript ? ' ' : '') + transcript;
         }
       }
 
@@ -868,8 +1003,8 @@ function NotesApp() {
       liveInterimRef.current = cleanInterim;
 
       if (target === 'chat') {
-        if (finalChunk.trim()) {
-          const cleanFinal = postProcessSpeechTranscript(finalChunk.trim(), false);
+        if (newFinalText.trim()) {
+          const cleanFinal = postProcessSpeechTranscript(newFinalText.trim(), false);
           setChatInput(prev => {
             const base = committedChatPrefixRef.current || prev;
             const needsSpace = base.length > 0 && 
@@ -884,36 +1019,24 @@ function NotesApp() {
           setLiveInterimText('');
           liveInterimRef.current = '';
         } else if (cleanInterim) {
-          // Display interim words in chat input as user speaks
           const base = committedChatPrefixRef.current;
           const needsSpace = base.length > 0 && !base.endsWith(' ') && !base.endsWith('\n');
           const preview = base + (needsSpace ? ' ' : '') + cleanInterim;
           setChatInput(preview.slice(0, MAX_CHARS));
         }
       } else {
-        // target === 'note': Append ONLY finalized chunks to the note body
-        if (finalChunk.trim()) {
+        if (newFinalText.trim()) {
           const isHtml = true;
-          const cleanFinal = postProcessSpeechTranscript(finalChunk.trim(), isHtml);
+          const cleanFinal = postProcessSpeechTranscript(newFinalText.trim(), isHtml);
           const formattedHtml = cleanFinal.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
 
           if (editorRef.current) {
-            const content = editorRef.current.innerHTML;
-            const needsSpace = content.length > 0 && 
-              !content.endsWith('<br>') && 
-              !content.endsWith(' ') && 
-              !cleanFinal.startsWith('<br>') && 
-              !/^[.,!?:;]/.test(cleanFinal);
-            const spacer = needsSpace ? ' ' : '';
-            editorRef.current.innerHTML = content + spacer + formattedHtml;
-            normalizeEditorUnderlines(editorRef.current);
-            const nextHtml = editorRef.current.innerHTML;
+            const nextHtml = insertHtmlAtCursor(editorRef.current, formattedHtml);
             setEditContent(nextHtml);
             committedNoteHtmlRef.current = nextHtml;
             if (activeNoteId) {
               setNotes(prev => prev.map(n => n.id === activeNoteId ? { ...n, content: nextHtml, updatedAt: Date.now() } : n));
             }
-            editorRef.current.scrollTop = editorRef.current.scrollHeight;
           } else {
             setEditContent(prev => {
               const needsSpace = prev.length > 0 && 
@@ -933,7 +1056,6 @@ function NotesApp() {
           setLiveInterimText('');
           liveInterimRef.current = '';
         }
-        // Interim text is kept in liveInterimText for temporary preview without duplicating or polluting editor DOM
       }
     };
 
@@ -941,11 +1063,7 @@ function NotesApp() {
       const err = event.error;
       console.warn("Speech recognition error:", err);
 
-      if (err === 'no-speech') {
-        // Normal during user thinking pauses; let continuous loop handle it
-        return;
-      }
-      if (err === 'aborted') {
+      if (err === 'no-speech' || err === 'aborted') {
         return;
       }
       if (err === 'not-allowed' || err === 'service-not-allowed') {
@@ -969,29 +1087,26 @@ function NotesApp() {
     };
 
     recognition.onend = async () => {
-      // Continuous listening loop: automatically restart on pause if user hasn't explicitly stopped
-      if (shouldKeepRecordingRef.current) {
+      if (recognitionRef.current === recognition) {
+        recognitionRef.current = null;
+      }
+
+      if (shouldKeepRecordingRef.current && currentSessionIdRef.current === sessionId) {
         setLiveInterimText('');
         liveInterimRef.current = '';
-        if (editorRef.current) {
-          const interimEl = editorRef.current.querySelector('#voice-interim-text');
-          if (interimEl) interimEl.remove();
-        }
 
         if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
         restartTimerRef.current = setTimeout(() => {
-          if (shouldKeepRecordingRef.current) {
-            startRecognitionSession(currentTargetRef.current);
+          if (shouldKeepRecordingRef.current && currentSessionIdRef.current === sessionId) {
+            startRecognitionSession(currentTargetRef.current, sessionId);
           }
         }, 120);
         return;
       }
 
-      // Explicit stop
       setIsRecording(false);
       setLiveInterimText('');
       liveInterimRef.current = '';
-      finalizedIndexSetRef.current = new Set();
       if (editorRef.current) {
         normalizeEditorUnderlines(editorRef.current);
         const finalContent = editorRef.current.innerHTML;
@@ -1002,7 +1117,6 @@ function NotesApp() {
         }
       }
 
-      // AI polish if note dictation had punctuation commands
       if (target === 'note' && editorRef.current && activeNoteId) {
         const currentHtml = editorRef.current.innerHTML;
         if (/\b(?:period|comma|question\s+mark|exclamation\s+(?:mark|point)|new\s+line|next\s+line|colon|semicolon|full\s+stop)\b/i.test(currentHtml)) {
@@ -1022,11 +1136,11 @@ function NotesApp() {
       recognition.start();
     } catch (err) {
       console.error("Error executing recognition.start():", err);
-      if (shouldKeepRecordingRef.current) {
+      if (shouldKeepRecordingRef.current && currentSessionIdRef.current === sessionId) {
         if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
         restartTimerRef.current = setTimeout(() => {
-          if (shouldKeepRecordingRef.current) {
-            startRecognitionSession(currentTargetRef.current);
+          if (shouldKeepRecordingRef.current && currentSessionIdRef.current === sessionId) {
+            startRecognitionSession(currentTargetRef.current, sessionId);
           }
         }, 200);
       } else {
@@ -1038,12 +1152,10 @@ function NotesApp() {
   const startVoiceRecording = async (target: 'chat' | 'note' = 'note', e?: React.MouseEvent) => {
     e?.stopPropagation();
 
-    // Voice dictation for notes requires an open note editor
     if (target === 'note' && !activeNoteId) {
       return;
     }
 
-    // Toggle OFF if already recording
     if (isRecording || shouldKeepRecordingRef.current) {
       stopVoiceRecording();
       return;
@@ -1063,7 +1175,11 @@ function NotesApp() {
       }
     }
 
-    // Set baseline strings for target
+    currentSessionIdRef.current += 1;
+    processedFinalTranscriptsRef.current = new Set();
+    lastFinalUtteranceRef.current = { text: '', time: 0 };
+    finalizedIndexSetRef.current = new Set();
+
     if (target === 'chat') {
       committedChatPrefixRef.current = chatInput;
     } else {
@@ -1081,8 +1197,7 @@ function NotesApp() {
     setLiveInterimText('');
     liveInterimRef.current = '';
 
-    // Directly trigger inside user gesture (vital for mobile browsers & Safari)
-    startRecognitionSession(target);
+    startRecognitionSession(target, currentSessionIdRef.current);
   };
 
   const deleteNote = (id: string, e?: React.MouseEvent) => {
@@ -1136,6 +1251,8 @@ function NotesApp() {
     }
     setActiveNoteId(note.id);
     setIsDrawing(false);
+    setDrawingHistory([]);
+    setDrawingRedoStack([]);
     setEditContent(note.content);
     setEditFontSize(note.fontSize || 48);
     setOpenMenuId(null);
@@ -1153,6 +1270,8 @@ function NotesApp() {
     }
     setActiveNoteId(note.id);
     setIsDrawing(true);
+    setDrawingHistory([]);
+    setDrawingRedoStack([]);
     setEditContent(note.content);
     setEditFontSize(note.fontSize || 48);
     setOpenMenuId(null);
@@ -1173,6 +1292,8 @@ function NotesApp() {
           n.id === activeNoteId ? { ...n, content: editContent, fontSize: editFontSize, updatedAt: Date.now() } : n
         )
       );
+      setDrawingHistory([]);
+      setDrawingRedoStack([]);
       setActiveNoteId(null);
       setIsEditorMenuOpen(false);
     }
@@ -1565,6 +1686,12 @@ function NotesApp() {
       e.evt.preventDefault();
     }
 
+    const note = notes.find(n => n.id === activeNoteId);
+    if (note) {
+      setDrawingHistory(prev => [...prev.slice(-25), note.drawingLines || []]);
+      setDrawingRedoStack([]);
+    }
+
     isPointerDrawingRef.current = true;
 
     const stage = e.target.getStage();
@@ -1575,7 +1702,6 @@ function NotesApp() {
       const transform = stage.getAbsoluteTransform().copy().invert();
       const relativePos = transform.point(pos);
       
-      const note = notes.find(n => n.id === activeNoteId);
       const newLines = [...(note?.drawingLines || []), { 
         tool: drawTool, 
         points: [relativePos.x, relativePos.y], 
@@ -1716,13 +1842,45 @@ function NotesApp() {
     lastCenter = null;
   };
 
+  const saveDrawingToHistory = (lines: DrawingLine[]) => {
+    setDrawingHistory(prev => [...prev.slice(-25), lines]);
+    setDrawingRedoStack([]);
+  };
+
   const updateDrawing = (id: string, lines: DrawingLine[]) => {
-    setNotes(prev => prev.map(n => n.id === id ? { ...n, drawingLines: lines } : n));
+    setNotes(prev => prev.map(n => n.id === id ? { ...n, drawingLines: lines, updatedAt: Date.now() } : n));
+  };
+
+  const undoDrawing = () => {
+    if (!activeNoteId || drawingHistory.length === 0) return;
+    const currentNote = notes.find(n => n.id === activeNoteId);
+    const currentLines = currentNote?.drawingLines || [];
+
+    const previousLines = drawingHistory[drawingHistory.length - 1];
+    setDrawingHistory(prev => prev.slice(0, -1));
+    setDrawingRedoStack(prev => [...prev.slice(-25), currentLines]);
+    updateDrawing(activeNoteId, previousLines);
+  };
+
+  const redoDrawing = () => {
+    if (!activeNoteId || drawingRedoStack.length === 0) return;
+    const currentNote = notes.find(n => n.id === activeNoteId);
+    const currentLines = currentNote?.drawingLines || [];
+
+    const nextLines = drawingRedoStack[drawingRedoStack.length - 1];
+    setDrawingRedoStack(prev => prev.slice(0, -1));
+    setDrawingHistory(prev => [...prev.slice(-25), currentLines]);
+    updateDrawing(activeNoteId, nextLines);
   };
 
   const clearDrawing = (id: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
-    setNotes(prev => prev.map(n => n.id === id ? { ...n, drawingLines: [] } : n));
+    const note = notes.find(n => n.id === id);
+    if (note && note.drawingLines && note.drawingLines.length > 0) {
+      setDrawingHistory(prev => [...prev.slice(-25), note.drawingLines]);
+      setDrawingRedoStack([]);
+    }
+    setNotes(prev => prev.map(n => n.id === id ? { ...n, drawingLines: [], updatedAt: Date.now() } : n));
     setOpenMenuId(null);
   };
 
@@ -2313,9 +2471,37 @@ function NotesApp() {
               </div>
 
               <div className="flex items-center gap-1 sm:gap-1.5 md:gap-2 shrink-0">
-                {/* Repositioned Sketch Tools: pen, eraser, pan, color swatches, clear, reset zoom - positioned immediately to the left of pencil icon */}
+                {/* Repositioned Sketch Tools: undo, redo, pen, eraser, pan, color swatches, clear, reset zoom */}
                 {isDrawing && activeNoteId && (
-                  <div className="flex items-center gap-1 sm:gap-1.5 bg-black/5 p-1 rounded-xl sm:rounded-2xl border border-black/5 shrink-0">
+                  <div className="flex items-center gap-1 sm:gap-1.5 bg-black/5 p-1 rounded-xl sm:rounded-2xl border border-black/5 shrink-0 touch-pan-x">
+                    {/* Undo Stroke */}
+                    <button
+                      onClick={undoDrawing}
+                      disabled={drawingHistory.length === 0}
+                      className={`min-w-[32px] min-h-[32px] sm:min-w-[36px] sm:min-h-[36px] p-1.5 sm:p-2 rounded-lg sm:rounded-xl transition-all flex items-center justify-center active:scale-95 ${
+                        drawingHistory.length === 0 ? 'opacity-30 cursor-not-allowed text-slate-400' : 'hover:bg-black/10 text-slate-700'
+                      }`}
+                      title="Undo Stroke"
+                      aria-label="Undo Stroke"
+                    >
+                      <RotateCcw size={15} className="sm:w-4 sm:h-4" />
+                    </button>
+
+                    {/* Redo Stroke */}
+                    <button
+                      onClick={redoDrawing}
+                      disabled={drawingRedoStack.length === 0}
+                      className={`min-w-[32px] min-h-[32px] sm:min-w-[36px] sm:min-h-[36px] p-1.5 sm:p-2 rounded-lg sm:rounded-xl transition-all flex items-center justify-center active:scale-95 ${
+                        drawingRedoStack.length === 0 ? 'opacity-30 cursor-not-allowed text-slate-400' : 'hover:bg-black/10 text-slate-700'
+                      }`}
+                      title="Redo Stroke"
+                      aria-label="Redo Stroke"
+                    >
+                      <RotateCw size={15} className="sm:w-4 sm:h-4" />
+                    </button>
+
+                    <div className="w-px h-5 bg-black/10 mx-0.5" />
+
                     <button
                       onClick={() => setDrawTool('pen')}
                       className={`min-w-[32px] min-h-[32px] sm:min-w-[36px] sm:min-h-[36px] p-1.5 sm:p-2 rounded-lg sm:rounded-xl transition-all flex items-center justify-center active:scale-95 ${drawTool === 'pen' ? 'bg-black text-white shadow-sm' : 'hover:bg-black/10 text-slate-700'}`}
@@ -2335,7 +2521,7 @@ function NotesApp() {
                     <button
                       onClick={() => setDrawTool('pan')}
                       className={`min-w-[32px] min-h-[32px] sm:min-w-[36px] sm:min-h-[36px] p-1.5 sm:p-2 rounded-lg sm:rounded-xl transition-all flex items-center justify-center active:scale-95 ${drawTool === 'pan' ? 'bg-black text-white shadow-sm' : 'hover:bg-black/10 text-slate-700'}`}
-                      title="Pan / Move View"
+                      title="Move Drawing (Drag strokes with finger/mouse)"
                       aria-label="Pan Tool"
                     >
                       <Hand size={15} className="sm:w-4 sm:h-4" />
@@ -2684,7 +2870,7 @@ function NotesApp() {
                       scaleY={stageScale}
                       x={stagePos.x}
                       y={stagePos.y}
-                      draggable={!isDrawing || drawTool === 'pan'}
+                      draggable={drawTool === 'pan' && !((notes.find(n => n.id === activeNoteId)?.drawingLines || []).length > 0)}
                       onDragEnd={(e) => {
                         setStagePos({ x: e.target.x(), y: e.target.y() });
                       }}
@@ -2697,20 +2883,42 @@ function NotesApp() {
                       onWheel={handleWheel}
                     >
                       <Layer>
-                        {(notes.find(n => n.id === activeNoteId)?.drawingLines || []).map((line, i) => (
-                          <KonvaLine
-                            key={i}
-                            points={line.points}
-                            stroke={line.color}
-                            strokeWidth={line.strokeWidth}
-                            tension={0.5}
-                            lineCap="round"
-                            lineJoin="round"
-                            globalCompositeOperation={
-                              line.tool === 'eraser' ? 'destination-out' : 'source-over'
+                        <Group
+                          draggable={drawTool === 'pan'}
+                          onDragEnd={(e) => {
+                            const dx = e.target.x();
+                            const dy = e.target.y();
+                            if (dx !== 0 || dy !== 0) {
+                              const currentNote = notes.find(n => n.id === activeNoteId);
+                              if (currentNote?.drawingLines && currentNote.drawingLines.length > 0) {
+                                saveDrawingToHistory(currentNote.drawingLines);
+                                const updatedLines = currentNote.drawingLines.map(line => ({
+                                  ...line,
+                                  points: line.points.map((val, idx) => idx % 2 === 0 ? val + dx : val + dy)
+                                }));
+                                updateDrawing(activeNoteId, updatedLines);
+                              }
+                              e.target.position({ x: 0, y: 0 });
+                              e.target.getStage()?.batchDraw();
                             }
-                          />
-                        ))}
+                          }}
+                        >
+                          {(notes.find(n => n.id === activeNoteId)?.drawingLines || []).map((line, i) => (
+                            <KonvaLine
+                              key={i}
+                              points={line.points}
+                              stroke={line.color}
+                              strokeWidth={line.strokeWidth}
+                              hitStrokeWidth={Math.max(28, line.strokeWidth)}
+                              tension={0.5}
+                              lineCap="round"
+                              lineJoin="round"
+                              globalCompositeOperation={
+                                line.tool === 'eraser' ? 'destination-out' : 'source-over'
+                              }
+                            />
+                          ))}
+                        </Group>
                       </Layer>
                     </Stage>
                   </div>
@@ -2806,7 +3014,14 @@ function NotesApp() {
                           />
                           <button
                             type="button"
-                            onClick={(e) => startVoiceRecording('chat', e)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (isRecording && currentTargetRef.current === 'chat') {
+                                stopVoiceRecording();
+                              } else {
+                                startVoiceRecording('chat', e);
+                              }
+                            }}
                             className={`min-w-[44px] min-h-[44px] p-2.5 rounded-xl md:rounded-2xl transition-all flex items-center justify-center shrink-0 ${
                               isRecording && currentTargetRef.current === 'chat'
                                 ? 'bg-rose-500 text-white animate-pulse shadow-lg'
