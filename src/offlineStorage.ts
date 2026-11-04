@@ -1,6 +1,9 @@
 const DB_NAME = 'vocal-note-offline';
 const DB_VERSION = 2;
 const STORE_NAME = 'app';
+const LEGACY_NOTES_KEY = 'stickie-notes-rainbow';
+const LEGACY_TEMPLATES_KEY = 'stickie-templates-rainbow';
+const SNAPSHOT_TIMESTAMP_KEY = 'stickie-offline-snapshot-saved-at';
 
 type Snapshot = {
   notes: unknown[];
@@ -8,12 +11,18 @@ type Snapshot = {
   savedAt: number;
 };
 
-const canUseIndexedDB = () => typeof window !== 'undefined' && 'indexedDB' in window;
+const canUseIndexedDB = () =>
+  typeof window !== 'undefined' && 'indexedDB' in window;
 
 function isValidSnapshot(value: unknown): value is Snapshot {
   if (!value || typeof value !== 'object') return false;
   const snapshot = value as Partial<Snapshot>;
-  return Array.isArray(snapshot.notes) && Array.isArray(snapshot.templates);
+  return (
+    Array.isArray(snapshot.notes) &&
+    Array.isArray(snapshot.templates) &&
+    (snapshot.savedAt === undefined ||
+      (typeof snapshot.savedAt === 'number' && Number.isFinite(snapshot.savedAt)))
+  );
 }
 
 function openDatabase(): Promise<IDBDatabase> {
@@ -32,8 +41,15 @@ function openDatabase(): Promise<IDBDatabase> {
       }
     };
 
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error || new Error('Unable to open IndexedDB'));
+    request.onsuccess = () => {
+      const db = request.result;
+      db.onversionchange = () => db.close();
+      resolve(db);
+    };
+    request.onerror = () =>
+      reject(request.error || new Error('Unable to open IndexedDB'));
+    request.onblocked = () =>
+      reject(new Error('IndexedDB upgrade is blocked by another open tab'));
   });
 }
 
@@ -43,13 +59,26 @@ async function readValue<T>(key: string): Promise<T | null> {
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(STORE_NAME, 'readonly');
     const request = transaction.objectStore(STORE_NAME).get(key);
+    let result: T | null = null;
 
-    request.onsuccess = () => resolve((request.result as T | undefined) ?? null);
-    request.onerror = () => reject(request.error || new Error('Unable to read offline data'));
-    transaction.oncomplete = () => db.close();
+    request.onsuccess = () => {
+      result = (request.result as T | undefined) ?? null;
+    };
+    request.onerror = () => {
+      db.close();
+      reject(request.error || new Error('Unable to read offline data'));
+    };
+    transaction.oncomplete = () => {
+      db.close();
+      resolve(result);
+    };
     transaction.onerror = () => {
       db.close();
       reject(transaction.error || new Error('Unable to read offline data'));
+    };
+    transaction.onabort = () => {
+      db.close();
+      reject(transaction.error || new Error('Offline read was aborted'));
     };
   });
 }
@@ -76,20 +105,42 @@ async function writeValue<T>(key: string, value: T): Promise<void> {
   });
 }
 
+/**
+ * Legacy localStorage stores notes/templates as separate arrays. Its timestamp
+ * must come from metadata written at save time, never from the time it is read.
+ * Older installs without metadata are treated as an unversioned migration source.
+ */
 function readLegacyStorage(): Snapshot | null {
   try {
-    const notesRaw = localStorage.getItem('stickie-notes-rainbow');
-    const templatesRaw = localStorage.getItem('stickie-templates-rainbow');
-    if (!notesRaw && !templatesRaw) return null;
+    const notesRaw = localStorage.getItem(LEGACY_NOTES_KEY);
+    const templatesRaw = localStorage.getItem(LEGACY_TEMPLATES_KEY);
+    if (notesRaw === null && templatesRaw === null) return null;
 
-    const notes = notesRaw ? JSON.parse(notesRaw) : [];
-    const templates = templatesRaw ? JSON.parse(templatesRaw) : [];
+    const notes = notesRaw === null ? [] : JSON.parse(notesRaw);
+    const templates = templatesRaw === null ? [] : JSON.parse(templatesRaw);
     if (!Array.isArray(notes) || !Array.isArray(templates)) return null;
 
-    return { notes, templates, savedAt: Date.now() };
+    const rawTimestamp = localStorage.getItem(SNAPSHOT_TIMESTAMP_KEY);
+    const parsedTimestamp = rawTimestamp === null ? 0 : Number(rawTimestamp);
+    const savedAt = Number.isFinite(parsedTimestamp) && parsedTimestamp > 0
+      ? parsedTimestamp
+      : 0;
+
+    return { notes, templates, savedAt };
   } catch (error) {
     console.warn('Legacy localStorage migration data is invalid.', error);
     return null;
+  }
+}
+
+function persistLegacySnapshot(snapshot: Snapshot): void {
+  try {
+    localStorage.setItem(LEGACY_NOTES_KEY, JSON.stringify(snapshot.notes));
+    localStorage.setItem(LEGACY_TEMPLATES_KEY, JSON.stringify(snapshot.templates));
+    localStorage.setItem(SNAPSHOT_TIMESTAMP_KEY, String(snapshot.savedAt));
+  } catch (error) {
+    // IndexedDB remains the primary store if localStorage is unavailable or full.
+    console.warn('Unable to update legacy offline-storage mirror:', error);
   }
 }
 
@@ -100,18 +151,35 @@ export async function loadOfflineSnapshot(): Promise<Snapshot | null> {
     const existing = await readValue<Snapshot>('snapshot');
     const isExistingValid = isValidSnapshot(existing);
 
-    // If both exist, compare timestamps to ensure we never overwrite newer data with older data
-    if (legacy && isExistingValid) {
-      const existingTime = existing.savedAt || 0;
-      const legacyTime = legacy.savedAt || 0;
-      if (existingTime > legacyTime) {
+    if (isExistingValid && legacy) {
+      // Prefer IndexedDB on ties and whenever legacy data has no trustworthy
+      // save-time metadata. Reading legacy data must never make it look newer.
+      if ((existing.savedAt || 0) >= legacy.savedAt) {
         return existing;
       }
-      return legacy;
+
+      // A genuinely newer legacy snapshot may come from an older app version.
+      // Migrate it immediately so IndexedDB becomes the canonical copy again.
+      const migrated = { ...legacy, savedAt: legacy.savedAt || Date.now() };
+      try {
+        await writeValue('snapshot', migrated);
+      } catch (migrationError) {
+        console.warn('Could not migrate newer legacy snapshot to IndexedDB:', migrationError);
+      }
+      return migrated;
     }
 
     if (isExistingValid) return existing;
-    if (legacy) return legacy;
+    if (legacy) {
+      const migrated = { ...legacy, savedAt: legacy.savedAt || Date.now() };
+      try {
+        await writeValue('snapshot', migrated);
+        persistLegacySnapshot(migrated);
+      } catch (migrationError) {
+        console.warn('Could not migrate legacy snapshot to IndexedDB:', migrationError);
+      }
+      return migrated;
+    }
 
     return null;
   } catch (error) {
@@ -120,22 +188,33 @@ export async function loadOfflineSnapshot(): Promise<Snapshot | null> {
   }
 }
 
-export async function saveOfflineSnapshot(notes: unknown[], templates: unknown[]): Promise<void> {
+// Serialize writes so slower IndexedDB operations cannot complete out of order
+// and replace a newer note snapshot with an older one.
+let saveQueue: Promise<void> = Promise.resolve();
+
+export function saveOfflineSnapshot(
+  notes: unknown[],
+  templates: unknown[]
+): Promise<void> {
   const snapshot: Snapshot = {
     notes: Array.isArray(notes) ? notes : [],
     templates: Array.isArray(templates) ? templates : [],
     savedAt: Date.now(),
   };
 
-  try {
-    await writeValue('snapshot', snapshot);
-  } catch (error) {
-    console.warn('Offline storage save failed:', error);
-    try {
-      localStorage.setItem('stickie-notes-rainbow', JSON.stringify(snapshot.notes));
-      localStorage.setItem('stickie-templates-rainbow', JSON.stringify(snapshot.templates));
-    } catch {
-      // Ignore quota/private-mode failures; the in-memory app remains usable.
-    }
-  }
+  const saveTask = saveQueue
+    .catch(() => undefined)
+    .then(async () => {
+      try {
+        await writeValue('snapshot', snapshot);
+        // Keep the legacy mirror and its timestamp in sync after IDB commits.
+        persistLegacySnapshot(snapshot);
+      } catch (error) {
+        console.warn('IndexedDB offline save failed; using localStorage fallback:', error);
+        persistLegacySnapshot(snapshot);
+      }
+    });
+
+  saveQueue = saveTask;
+  return saveTask;
 }
