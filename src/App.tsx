@@ -4,11 +4,10 @@
  */
 
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { Plus, Trash2, Edit3, Check, X, Palette, MessageCircle, Send, Sparkles, Loader2, Image as ImageIcon, Camera, MoreVertical, CheckCircle2, Mic, MicOff, Pencil, Eraser, ArrowLeft, Wand2, Bold, Type, Minus, Underline, Hand, Maximize, StickyNote, Download, Upload, Bell, RotateCcw, RotateCw } from 'lucide-react';
+import { Plus, Trash2, Edit3, Check, X, Palette, MessageCircle, Send, Sparkles, Loader2, Image as ImageIcon, Camera, MoreVertical, CheckCircle2, Mic, MicOff, ArrowLeft, Wand2, Bold, Type, Minus, Underline, Hand, Maximize, StickyNote, Download, Upload, Bell } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { GoogleGenAI } from "@google/genai";
 
-import { Stage, Layer, Group, Line as KonvaLine } from 'react-konva';
 import { postProcessSpeechTranscript, aiPostProcessSpeech, detectVoiceCommand, VoiceCommand } from './speechPostProcessor';
 import { loadOfflineSnapshot, saveOfflineSnapshot } from './offlineStorage';
 import { PWAInstallButton } from './PWAInstallButton';
@@ -27,11 +26,6 @@ interface DrawingLine {
   points: number[];
   color: string;
   strokeWidth: number;
-}
-
-interface DrawingSnapshot {
-  lines: DrawingLine[];
-  offset: { x: number; y: number };
 }
 
 interface Note {
@@ -533,10 +527,6 @@ function NotesApp() {
   const editorRef = useRef<HTMLDivElement>(null);
   const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
   const [activeNoteId, setActiveNoteId] = useState<string | null>(null);
-  const [editorMode, setEditorMode] = useState<'text' | 'draw'>('text');
-  const [drawTool, setDrawTool] = useState<'pen' | 'eraser' | 'pan'>('pen');
-  const [drawColor, setDrawColor] = useState('#000000');
-  
   const [isEditorMenuOpen, setIsEditorMenuOpen] = useState(false);
   
   // Unfinished Notes notification state
@@ -548,11 +538,6 @@ function NotesApp() {
   const unfinishedNotes = notes.filter((n) => !n.completed);
   const unfinishedCount = unfinishedNotes.length;
   
-  // Pan and Zoom state
-  const [stageScale, setStageScale] = useState(1);
-  const [stagePos, setStagePos] = useState({ x: 0, y: 0 });
-  const [panState, setPanState] = useState<{ lastX: number, lastY: number, isPanning: boolean } | null>(null);
-
   // In-app non-blocking Toast notification state (replaces window.alert for iframe compatibility)
   const [toast, setToast] = useState<{ id: string; message: string; type: 'info' | 'warning' | 'error' | 'success' } | null>(null);
 
@@ -581,23 +566,6 @@ function NotesApp() {
   const lastDictatedSnapshotRef = useRef<{ text: string; htmlBefore: string } | null>(null);
   const lastDictatedPhraseRef = useRef<string>('');
 
-  // Drawing state
-  const [isDrawing, setIsDrawing] = useState(false);
-  const [drawingHistory, setDrawingHistory] = useState<DrawingSnapshot[]>([]);
-  const [drawingRedoStack, setDrawingRedoStack] = useState<DrawingSnapshot[]>([]);
-  const drawingId = isDrawing ? activeNoteId : null;
-  const editingId = !isDrawing ? activeNoteId : null;
-  const isPointerDrawingRef = useRef(false);
-  // Keep the in-progress stroke in a mutable draft and commit it at a capped
-  // frame rate. This avoids rebuilding every Konva line on every pointer event.
-  const drawingDraftRef = useRef<{
-    noteId: string;
-    lines: DrawingLine[];
-    pending: boolean;
-    frame: number | null;
-    lastCommitAt: number;
-  } | null>(null);
-
   // Ref for hidden file input
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [lastUploadTargetId, setLastUploadTargetId] = useState<string | null>(null);
@@ -610,8 +578,6 @@ function NotesApp() {
   ]);
   const [isLoading, setIsLoading] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
-  const canvasContainerRef = useRef<HTMLDivElement>(null);
-  const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
   const [micPermissionStatus, setMicPermissionStatus] = useState<'granted' | 'denied' | 'prompt' | 'unknown'>('unknown');
   const [micErrorMessage, setMicErrorMessage] = useState<string | null>(null);
   const [isStorageLoaded, setIsStorageLoaded] = useState(false);
@@ -805,7 +771,6 @@ function NotesApp() {
   const getNoteSummary = (note: Note) => {
     if (!note.content) {
       if (note.image) return 'Photo Note';
-      if (note.drawingLines && note.drawingLines.length > 0) return 'Sketch Note';
       return 'Untitled Note';
     }
     const tempDiv = document.createElement('div');
@@ -816,7 +781,6 @@ function NotesApp() {
       return firstLine.length > 36 ? firstLine.slice(0, 36) + '...' : firstLine;
     }
     if (note.image) return 'Photo Note';
-    if (note.drawingLines && note.drawingLines.length > 0) return 'Sketch Note';
     return 'Untitled Note';
   };
 
@@ -844,13 +808,12 @@ function NotesApp() {
     setNotes(prev => prev.map(n => n.id === id ? { ...n, completed: true, updatedAt: Date.now() } : n));
   };
 
-  const addNote = (content = '', image?: string, drawingLines?: DrawingLine[], color?: string, pattern?: string) => {
+  const addNote = (content = '', image?: string, color?: string, pattern?: string) => {
     const notePatterns = PATTERNS.filter(p => p !== 'none');
     const newNote: Note = {
       id: crypto.randomUUID(),
       content,
       image,
-      drawingLines,
       completed: false,
       color: color || COLORS[notes.length % COLORS.length], // Cyclic rainbow colors
       pattern: pattern || notePatterns[notes.length % notePatterns.length],
@@ -861,9 +824,8 @@ function NotesApp() {
       updatedAt: Date.now(),
     };
     setNotes([newNote, ...notes]);
-    if (!content && !image && !drawingLines) {
+    if (!content && !image) {
       setActiveNoteId(newNote.id);
-      setIsDrawing(false);
       setEditContent('');
     }
   };
@@ -884,7 +846,6 @@ function NotesApp() {
       content: note.content,
       color: note.color,
       pattern: note.pattern,
-      drawingLines: note.drawingLines,
       image: note.image,
       fontSize: note.fontSize,
     };
@@ -895,7 +856,7 @@ function NotesApp() {
   };
 
   const applyTemplate = (template: Template) => {
-    addNote(template.content, template.image, template.drawingLines, template.color, template.pattern);
+    addNote(template.content, template.image, template.color, template.pattern);
     // Explicitly set font styling after adding if available
     setNotes(prev => prev.map((n, i) => i === 0 ? { ...n, fontSize: template.fontSize || 48 } : n));
     setIsTemplatesModalOpen(false);
@@ -1468,28 +1429,6 @@ function NotesApp() {
       stopVoiceRecording();
     }
     setActiveNoteId(note.id);
-    setIsDrawing(false);
-    setDrawingHistory([]);
-    setDrawingRedoStack([]);
-    setEditContent(note.content);
-    setEditFontSize(note.fontSize || 48);
-    setOpenMenuId(null);
-    setIsEditorMenuOpen(false);
-    
-    // Reset canvas view
-    setStageScale(1);
-    setStagePos({ x: 0, y: 0 });
-  };
-
-  const startDrawing = (note: Note, e?: React.MouseEvent) => {
-    e?.stopPropagation();
-    if (isRecording || shouldKeepRecordingRef.current) {
-      stopVoiceRecording();
-    }
-    setActiveNoteId(note.id);
-    setIsDrawing(true);
-    setDrawingHistory([]);
-    setDrawingRedoStack([]);
     setEditContent(note.content);
     setEditFontSize(note.fontSize || 48);
     setOpenMenuId(null);
@@ -1510,8 +1449,6 @@ function NotesApp() {
           n.id === activeNoteId ? { ...n, content: editContent, fontSize: editFontSize, updatedAt: Date.now() } : n
         )
       );
-      setDrawingHistory([]);
-      setDrawingRedoStack([]);
       setActiveNoteId(null);
       setIsEditorMenuOpen(false);
     }
@@ -1869,345 +1806,6 @@ function NotesApp() {
     setOpenMenuId(openMenuId === id ? null : id);
   };
 
-  const toggleDrawing = (id: string, e?: React.MouseEvent) => {
-    e?.stopPropagation();
-    if (activeNoteId === id && isDrawing) {
-      setIsDrawing(false);
-    } else {
-      setActiveNoteId(id);
-      setIsDrawing(true);
-      setOpenMenuId(null);
-    }
-  };
-
-  // Resize observer for drawing canvas
-  useEffect(() => {
-    if (!canvasContainerRef.current) return;
-    const observer = new ResizeObserver((entries) => {
-      const { width, height } = entries[0].contentRect;
-      setCanvasSize({ width, height });
-    });
-    observer.observe(canvasContainerRef.current);
-    return () => observer.disconnect();
-  }, [activeNoteId, isDrawing]);
-
-  const handlePointerDown = (e: any) => {
-    if (!activeNoteId || drawTool === 'pan') return;
-    
-    // Only draw if we are not multi-touching
-    if (e.evt && e.evt.touches && e.evt.touches.length > 1) {
-      isPointerDrawingRef.current = false;
-      return;
-    }
-
-    if (e.evt && e.evt.cancelable) {
-      e.evt.preventDefault();
-    }
-
-    const note = notes.find(n => n.id === activeNoteId);
-    if (note) {
-      setDrawingHistory(prev => [...prev.slice(-25), {
-        lines: note.drawingLines || [],
-        offset: note.drawingOffset || { x: 0, y: 0 },
-      }]);
-      setDrawingRedoStack([]);
-    }
-
-    isPointerDrawingRef.current = true;
-
-    const stage = e.target.getStage();
-    const pos = stage.getPointerPosition();
-    
-    if (pos) {
-      // Calculate position relative to stage transforms
-      const transform = stage.getAbsoluteTransform().copy().invert();
-      const relativePos = transform.point(pos);
-      
-      const newLines = [...(note?.drawingLines || []), {
-        tool: drawTool,
-        points: [relativePos.x, relativePos.y],
-        color: drawColor,
-        strokeWidth: drawTool === 'eraser' ? 40 / stageScale : 4 / stageScale
-      }];
-      const existingDraft = drawingDraftRef.current;
-      if (existingDraft?.frame !== null && existingDraft?.frame !== undefined) {
-        cancelAnimationFrame(existingDraft.frame);
-      }
-      if (drawTool === 'eraser') {
-        // Keep the mutable eraser draft separate from the immutable React state.
-        const draftLines = [
-          ...newLines.slice(0, -1),
-          { ...newLines[newLines.length - 1], points: [...newLines[newLines.length - 1].points] },
-        ];
-        drawingDraftRef.current = {
-          noteId: activeNoteId,
-          lines: draftLines,
-          pending: false,
-          frame: null,
-          lastCommitAt: Date.now(),
-        };
-      } else {
-        drawingDraftRef.current = null;
-      }
-      updateDrawing(activeNoteId, newLines);
-    }
-  };
-
-  const handlePointerMove = (e: any) => {
-    if (!activeNoteId || drawTool === 'pan') return;
-
-    if (e.evt && e.evt.touches && e.evt.touches.length > 1) {
-      handleTouchMove(e);
-      return;
-    }
-    
-    // Drawing is active if touch pointer is down OR mouse button 1 is down
-    const isDrawingActive = isPointerDrawingRef.current || (e.evt && e.evt.buttons === 1);
-    if (!isDrawingActive) return;
-
-    if (e.evt && e.evt.cancelable) {
-      e.evt.preventDefault();
-    }
-
-    const stage = e.target.getStage();
-    const pos = stage.getPointerPosition();
-    const note = notes.find(n => n.id === activeNoteId);
-    const draft = drawingDraftRef.current;
-
-    if (pos && drawTool === 'eraser' && draft?.noteId === activeNoteId && draft.lines.length > 0) {
-      const transform = stage.getAbsoluteTransform().copy().invert();
-      const relativePos = transform.point(pos);
-      const lastLine = draft.lines[draft.lines.length - 1];
-      const pts = lastLine.points;
-      const lastX = pts[pts.length - 2];
-      const lastY = pts[pts.length - 1];
-
-      // Ignore tiny pointer jitter; append to the draft without triggering a
-      // React/Konva render for every hardware pointer event.
-      if (Math.hypot(relativePos.x - lastX, relativePos.y - lastY) > 1.2) {
-        pts.push(relativePos.x, relativePos.y);
-        draft.pending = true;
-        scheduleDrawingCommit(activeNoteId);
-      }
-    } else if (pos && drawTool !== 'eraser' && note?.drawingLines?.length) {
-      // Preserve the existing pen behaviour; only the expensive eraser path
-      // uses batched commits.
-      const transform = stage.getAbsoluteTransform().copy().invert();
-      const relativePos = transform.point(pos);
-      const lines = [...note.drawingLines];
-      const lastLine = { ...lines[lines.length - 1] };
-      const pts = lastLine.points;
-      const lastX = pts[pts.length - 2];
-      const lastY = pts[pts.length - 1];
-      if (Math.hypot(relativePos.x - lastX, relativePos.y - lastY) > 1.2) {
-        lastLine.points = pts.concat([relativePos.x, relativePos.y]);
-        lines[lines.length - 1] = lastLine;
-        updateDrawing(activeNoteId, lines);
-      }
-    }
-  };
-
-  const handleWheel = (e: any) => {
-    e.evt.preventDefault();
-    const stage = e.target.getStage();
-    const oldScale = stage.scaleX();
-    const pointer = stage.getPointerPosition();
-
-    const mousePointTo = {
-      x: (pointer.x - stage.x()) / oldScale,
-      y: (pointer.y - stage.y()) / oldScale,
-    };
-
-    const speed = 0.05;
-    const newScale = e.evt.deltaY > 0 ? oldScale * (1 - speed) : oldScale * (1 + speed);
-
-    setStageScale(newScale);
-    setStagePos({
-      x: pointer.x - mousePointTo.x * newScale,
-      y: pointer.y - mousePointTo.y * newScale,
-    });
-  };
-
-  const getDistance = (p1: any, p2: any) => {
-    return Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
-  };
-
-  const getCenter = (p1: any, p2: any) => {
-    return {
-      x: (p1.x + p2.x) / 2,
-      y: (p1.y + p2.y) / 2,
-    };
-  };
-
-  let lastDist = 0;
-  let lastCenter: any = null;
-
-  const handleTouchMove = (e: any) => {
-    if (e.evt && e.evt.cancelable) {
-      e.evt.preventDefault();
-    }
-    const touch1 = e.evt.touches[0];
-    const touch2 = e.evt.touches[1];
-
-    if (touch1 && touch2) {
-      const stage = e.target.getStage();
-      if (stage.isDragging()) {
-        stage.stopDrag();
-      }
-
-      const p1 = { x: touch1.clientX, y: touch1.clientY };
-      const p2 = { x: touch2.clientX, y: touch2.clientY };
-
-      if (!lastCenter) {
-        lastCenter = getCenter(p1, p2);
-        return;
-      }
-
-      const newCenter = getCenter(p1, p2);
-      const dist = getDistance(p1, p2);
-
-      if (!lastDist) {
-        lastDist = dist;
-      }
-
-      // Local variables for current transformation to calculate new ones
-      const currScale = stage.scaleX();
-      const currPos = { x: stage.x(), y: stage.y() };
-
-      const pointTo = {
-        x: (newCenter.x - currPos.x) / currScale,
-        y: (newCenter.y - currPos.y) / currScale,
-      };
-
-      const newScale = currScale * (dist / lastDist);
-
-      setStageScale(newScale);
-      setStagePos({
-        x: newCenter.x - pointTo.x * newScale,
-        y: newCenter.y - pointTo.y * newScale,
-      });
-
-      lastDist = dist;
-      lastCenter = newCenter;
-    }
-  };
-
-  const handlePointerUp = () => {
-    isPointerDrawingRef.current = false;
-    const draft = drawingDraftRef.current;
-    if (draft) flushDrawingCommit(draft.noteId);
-    lastDist = 0;
-    lastCenter = null;
-  };
-
-  const saveDrawingToHistory = (note: Note) => {
-    setDrawingHistory(prev => [...prev.slice(-25), {
-      lines: note.drawingLines || [],
-      offset: note.drawingOffset || { x: 0, y: 0 },
-    }]);
-    setDrawingRedoStack([]);
-  };
-
-  const updateDrawing = (id: string, lines: DrawingLine[]) => {
-    setNotes(prev => prev.map(n => n.id === id ? { ...n, drawingLines: lines, updatedAt: Date.now() } : n));
-  };
-
-  const flushDrawingCommit = (noteId: string) => {
-    const draft = drawingDraftRef.current;
-    if (!draft || draft.noteId !== noteId) return;
-    if (draft.frame !== null) {
-      cancelAnimationFrame(draft.frame);
-      draft.frame = null;
-    }
-    if (!draft.pending) return;
-
-    const lastIndex = draft.lines.length - 1;
-    const lastLine = draft.lines[lastIndex];
-    // Commit immutable copies so React state is never mutated by later input.
-    const committedLines = [
-      ...draft.lines.slice(0, lastIndex),
-      { ...lastLine, points: [...lastLine.points] },
-    ];
-    draft.pending = false;
-    draft.lastCommitAt = Date.now();
-    updateDrawing(noteId, committedLines);
-  };
-
-  const scheduleDrawingCommit = (noteId: string) => {
-    const draft = drawingDraftRef.current;
-    if (!draft || draft.noteId !== noteId || draft.frame !== null) return;
-
-    const commitOnFrame = () => {
-      const currentDraft = drawingDraftRef.current;
-      if (!currentDraft || currentDraft.noteId !== noteId) return;
-      currentDraft.frame = null;
-      if (!currentDraft.pending) return;
-
-      // Cap expensive React/Konva updates to roughly 30 per second while still
-      // collecting every meaningful pointer coordinate in the draft.
-      if (Date.now() - currentDraft.lastCommitAt < 32) {
-        currentDraft.frame = requestAnimationFrame(commitOnFrame);
-        return;
-      }
-      flushDrawingCommit(noteId);
-    };
-
-    draft.frame = requestAnimationFrame(commitOnFrame);
-  };
-
-  const updateDrawingOffset = (id: string, offset: { x: number; y: number }) => {
-    setNotes(prev => prev.map(n => n.id === id ? { ...n, drawingOffset: offset, updatedAt: Date.now() } : n));
-  };
-
-  const applyDrawingSnapshot = (id: string, snapshot: DrawingSnapshot) => {
-    setNotes(prev => prev.map(n => n.id === id
-      ? { ...n, drawingLines: snapshot.lines, drawingOffset: snapshot.offset, updatedAt: Date.now() }
-      : n
-    ));
-  };
-
-  const undoDrawing = () => {
-    if (!activeNoteId || drawingHistory.length === 0) return;
-    const currentNote = notes.find(n => n.id === activeNoteId);
-    const currentSnapshot: DrawingSnapshot = {
-      lines: currentNote?.drawingLines || [],
-      offset: currentNote?.drawingOffset || { x: 0, y: 0 },
-    };
-    const previousSnapshot = drawingHistory[drawingHistory.length - 1];
-    setDrawingHistory(prev => prev.slice(0, -1));
-    setDrawingRedoStack(prev => [...prev.slice(-25), currentSnapshot]);
-    applyDrawingSnapshot(activeNoteId, previousSnapshot);
-  };
-
-  const redoDrawing = () => {
-    if (!activeNoteId || drawingRedoStack.length === 0) return;
-    const currentNote = notes.find(n => n.id === activeNoteId);
-    const currentSnapshot: DrawingSnapshot = {
-      lines: currentNote?.drawingLines || [],
-      offset: currentNote?.drawingOffset || { x: 0, y: 0 },
-    };
-    const nextSnapshot = drawingRedoStack[drawingRedoStack.length - 1];
-    setDrawingRedoStack(prev => prev.slice(0, -1));
-    setDrawingHistory(prev => [...prev.slice(-25), currentSnapshot]);
-    applyDrawingSnapshot(activeNoteId, nextSnapshot);
-  };
-
-  const clearDrawing = (id: string, e?: React.MouseEvent) => {
-    e?.stopPropagation();
-    const note = notes.find(n => n.id === id);
-    if (note && note.drawingLines && note.drawingLines.length > 0) {
-      setDrawingHistory(prev => [...prev.slice(-25), {
-        lines: note.drawingLines || [],
-        offset: note.drawingOffset || { x: 0, y: 0 },
-      }]);
-      setDrawingRedoStack([]);
-    }
-    setNotes(prev => prev.map(n => n.id === id ? { ...n, drawingLines: [], updatedAt: Date.now() } : n));
-    setOpenMenuId(null);
-  };
-
-
-
   const handleSendMessage = async () => {
     if (!chatInput.trim() || isLoading) return;
 
@@ -2263,7 +1861,7 @@ function NotesApp() {
     if (!activeNoteId) return;
     
     // Use the current drawing color as the "selected font color"
-    const coloredText = `<span style="color: ${drawColor}">${suggestion}</span>`;
+    const coloredText = `<span>${suggestion}</span>`;
     
     const newContent = editContent + (editContent.length > 0 && !editContent.endsWith('<br>') ? '<br><br>' : '') + coloredText;
     setEditContent(newContent);
@@ -2626,38 +2224,12 @@ function NotesApp() {
                   )}
 
                   <div className="w-full flex-1 min-h-0 flex flex-col relative overflow-hidden my-0.5">
-                    {/* Drawing Layer Preview */}
-                    {(note.drawingLines && note.drawingLines.length > 0) && (
-                      <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
-                        <Stage width={280} height={220} className="w-full h-full">
-                          <Layer>
-                            <Group x={note.drawingOffset?.x || 0} y={note.drawingOffset?.y || 0}>
-                              {note.drawingLines.map((line, i) => (
-                                <KonvaLine
-                                  key={i}
-                                  points={line.points}
-                                  stroke={line.color}
-                                  strokeWidth={line.strokeWidth}
-                                  tension={0.5}
-                                  lineCap="round"
-                                  lineJoin="round"
-                                  globalCompositeOperation={
-                                    line.tool === 'eraser' ? 'destination-out' : 'source-over'
-                                  }
-                                />
-                              ))}
-                            </Group>
-                          </Layer>
-                        </Stage>
-                      </div>
-                    )}
-
                     <div 
                       className="w-full flex-1 min-h-0 overflow-y-auto overscroll-contain pr-1.5 leading-[1.45] text-[#222] break-words relative z-10 note-content custom-scrollbar pointer-events-auto"
                       style={{ 
                         fontSize: `${Math.min(18, Math.max(13, (note.fontSize || 48) / 2.7))}px`
                       }}
-                      dangerouslySetInnerHTML={{ __html: note.content || (!note.image && !note.drawingLines?.length ? '<span class="opacity-20 italic">Empty note...</span>' : '') }}
+                      dangerouslySetInnerHTML={{ __html: note.content || (!note.image ? '<span class="opacity-20 italic">Empty note...</span>' : '') }}
                     />
                   </div>
                   
@@ -2676,14 +2248,6 @@ function NotesApp() {
                     >
                       <Palette size={16} />
                     </button>
-                    <button
-                      onClick={(e) => toggleDrawing(note.id, e)}
-                      className="min-w-[36px] min-h-[36px] p-2 rounded-xl bg-white/20 hover:bg-purple-600 hover:text-white text-purple-700 transition-colors border border-black/10 flex items-center justify-center"
-                      title="Sketch Note"
-                    >
-                      <Pencil size={16} />
-                    </button>
-
                     {/* Three-Dot Options Menu */}
                     <div className="relative">
                       <button
@@ -2711,13 +2275,6 @@ function NotesApp() {
                             >
                               <Edit3 size={15} className="text-slate-500" />
                               <span>Edit Note</span>
-                            </button>
-                            <button
-                              onClick={(e) => toggleDrawing(note.id, e)}
-                              className="flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-black/5 text-purple-600 transition-colors w-full text-left min-h-[40px]"
-                            >
-                              <Pencil size={15} />
-                              <span>Sketch / Draw</span>
                             </button>
                             <button
                               onClick={(e) => triggerGallery(note.id, e)}
@@ -2789,118 +2346,11 @@ function NotesApp() {
                   <ArrowLeft size={20} className="sm:w-[22px] sm:h-[22px]" />
                 </button>
                 <div className={`px-2.5 sm:px-3.5 py-1.5 rounded-full text-[9px] sm:text-[10px] font-black uppercase tracking-wider ${notes.find(n => n.id === activeNoteId)?.color} bg-opacity-40 border border-black/5 shadow-sm shrink-0`}>
-                  <span className="hidden xs:inline">{isDrawing ? 'Sketch Mode' : 'Write Mode'}</span>
-                  <span className="xs:hidden">{isDrawing ? 'Sketch' : 'Write'}</span>
+                  <span>Write Mode</span>
                 </div>
               </div>
 
               <div className="flex items-center gap-1.5 sm:gap-2 md:gap-2.5 shrink-0">
-                {/* Repositioned Sketch Tools: undo, redo, pen, eraser, pan, color swatches, clear, reset zoom */}
-                {isDrawing && activeNoteId && (
-                  <div className="flex items-center gap-1 sm:gap-1.5 bg-black/5 p-1 sm:p-1.5 rounded-xl sm:rounded-2xl border border-black/5 shrink-0 touch-pan-x">
-                    {/* Undo Stroke */}
-                    <button
-                      onClick={undoDrawing}
-                      disabled={drawingHistory.length === 0}
-                      className={`min-w-[34px] min-h-[34px] sm:min-w-[38px] sm:min-h-[38px] p-2 rounded-lg sm:rounded-xl transition-all flex items-center justify-center active:scale-95 ${
-                        drawingHistory.length === 0 ? 'opacity-30 cursor-not-allowed text-slate-400' : 'hover:bg-black/10 text-slate-700'
-                      }`}
-                      title="Undo Stroke"
-                      aria-label="Undo Stroke"
-                    >
-                      <RotateCcw size={16} className="sm:w-4.5 sm:h-4.5" />
-                    </button>
-
-                    {/* Redo Stroke */}
-                    <button
-                      onClick={redoDrawing}
-                      disabled={drawingRedoStack.length === 0}
-                      className={`min-w-[34px] min-h-[34px] sm:min-w-[38px] sm:min-h-[38px] p-2 rounded-lg sm:rounded-xl transition-all flex items-center justify-center active:scale-95 ${
-                        drawingRedoStack.length === 0 ? 'opacity-30 cursor-not-allowed text-slate-400' : 'hover:bg-black/10 text-slate-700'
-                      }`}
-                      title="Redo Stroke"
-                      aria-label="Redo Stroke"
-                    >
-                      <RotateCw size={16} className="sm:w-4.5 sm:h-4.5" />
-                    </button>
-
-                    <div className="w-px h-5 bg-black/10 mx-0.5" />
-
-                    <button
-                      onClick={() => setDrawTool('pen')}
-                      className={`min-w-[34px] min-h-[34px] sm:min-w-[38px] sm:min-h-[38px] p-2 rounded-lg sm:rounded-xl transition-all flex items-center justify-center active:scale-95 ${drawTool === 'pen' ? 'bg-black text-white shadow-sm' : 'hover:bg-black/10 text-slate-700'}`}
-                      title="Pen Tool"
-                      aria-label="Pen Tool"
-                    >
-                      <Pencil size={16} className="sm:w-4.5 sm:h-4.5" />
-                    </button>
-                    <button
-                      onClick={() => setDrawTool('eraser')}
-                      className={`min-w-[34px] min-h-[34px] sm:min-w-[38px] sm:min-h-[38px] p-2 rounded-lg sm:rounded-xl transition-all flex items-center justify-center active:scale-95 ${drawTool === 'eraser' ? 'bg-black text-white shadow-sm' : 'hover:bg-black/10 text-slate-700'}`}
-                      title="Eraser Tool"
-                      aria-label="Eraser Tool"
-                    >
-                      <Eraser size={16} className="sm:w-4.5 sm:h-4.5" />
-                    </button>
-                    <button
-                      onClick={() => setDrawTool('pan')}
-                      className={`min-w-[34px] min-h-[34px] sm:min-w-[38px] sm:min-h-[38px] p-2 rounded-lg sm:rounded-xl transition-all flex items-center justify-center active:scale-95 ${drawTool === 'pan' ? 'bg-black text-white shadow-sm' : 'hover:bg-black/10 text-slate-700'}`}
-                      title="Move Drawing (Drag strokes with finger/mouse)"
-                      aria-label="Pan Tool"
-                    >
-                      <Hand size={16} className="sm:w-4.5 sm:h-4.5" />
-                    </button>
-
-                    <div className="w-px h-5 bg-black/10 mx-0.5" />
-
-                    {/* Color Swatches */}
-                    <div className="flex items-center gap-1.5 px-0.5">
-                      {['#000000', '#ef4444', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6'].map(c => (
-                        <button
-                          key={c}
-                          onClick={() => { setDrawColor(c); setDrawTool('pen'); }}
-                          className={`w-6 h-6 sm:w-6.5 sm:h-6.5 shrink-0 rounded-full border border-black/10 transition-all hover:scale-110 active:scale-95 ${drawColor === c && drawTool === 'pen' ? 'ring-2 ring-black ring-offset-1 scale-105' : ''}`}
-                          style={{ backgroundColor: c }}
-                          aria-label={`Color ${c}`}
-                        />
-                      ))}
-                    </div>
-
-                    <div className="w-px h-5 bg-black/10 mx-0.5" />
-
-                    {/* Clear Canvas */}
-                    <button
-                      onClick={(e) => clearDrawing(activeNoteId, e)}
-                      className="min-w-[32px] min-h-[32px] sm:min-w-[36px] sm:min-h-[36px] px-2 py-1.5 rounded-lg sm:rounded-xl hover:bg-orange-50 text-slate-600 hover:text-orange-600 transition-all flex items-center justify-center gap-1 text-[11px] font-bold active:scale-95"
-                      title="Clear Canvas"
-                      aria-label="Clear Canvas"
-                    >
-                      <Trash2 size={15} className="sm:w-4 sm:h-4" />
-                      <span className="hidden xl:inline">Clear</span>
-                    </button>
-
-                    {/* Reset Zoom */}
-                    <button
-                      onClick={() => { setStageScale(1); setStagePos({ x: 0, y: 0 }); }}
-                      className="min-w-[32px] min-h-[32px] sm:min-w-[36px] sm:min-h-[36px] p-2 rounded-lg sm:rounded-xl hover:bg-black/10 text-slate-500 transition-all flex items-center justify-center active:scale-95"
-                      title="Reset Zoom"
-                      aria-label="Reset Zoom"
-                    >
-                      <Maximize size={15} className="sm:w-4 sm:h-4" />
-                    </button>
-                  </div>
-                )}
-
-                {/* Pencil / Sketch Mode Switcher */}
-                <button
-                  onClick={() => setIsDrawing(!isDrawing)}
-                  className={`min-w-[40px] min-h-[40px] sm:min-w-[44px] sm:min-h-[44px] p-2 sm:p-2.5 rounded-xl sm:rounded-2xl transition-all flex items-center justify-center active:scale-95 shrink-0 ${isDrawing ? 'bg-purple-600 text-white shadow-md' : 'bg-black/5 hover:bg-black/10 text-slate-700'}`}
-                  title={isDrawing ? "Switch to Writing Mode" : "Switch to Sketch Mode"}
-                  aria-label={isDrawing ? "Writing Mode" : "Sketch Mode"}
-                >
-                  <Pencil size={18} className="sm:w-5 sm:h-5" />
-                </button>
-
                 {/* Voice Dictation Button */}
                 <button
                   onClick={(e) => {
@@ -3158,7 +2608,7 @@ function NotesApp() {
                       fontSize: `${isMobile ? Math.min(28, Math.max(16, editFontSize * 0.65)) : editFontSize}px`,
                       fontWeight: 500
                     }}
-                    className={`flex-1 w-full bg-transparent focus:outline-none leading-[1.35] text-[#333] note-content z-10 relative overflow-y-auto whitespace-pre-wrap ${isDrawing ? 'pointer-events-none' : 'pointer-events-auto'} min-h-[160px] pb-16`}
+                    className="flex-1 w-full bg-transparent focus:outline-none leading-[1.35] text-[#333] note-content z-10 relative overflow-y-auto whitespace-pre-wrap pointer-events-auto min-h-[160px] pb-16"
                   />
                   
                   {/* Live Speech Interim Preview Pill (Temporary, strictly separated from note body) */}
@@ -3181,69 +2631,6 @@ function NotesApp() {
                     </div>
                   )}
 
-                  {/* Drawing Layer Overlay */}
-                  <div 
-                    ref={canvasContainerRef} 
-                    className={`absolute inset-0 z-20 touch-none ${isDrawing ? 'pointer-events-auto cursor-crosshair' : 'pointer-events-none'}`}
-                    style={{ touchAction: 'none' }}
-                  >
-                    <Stage
-                      width={canvasSize.width}
-                      height={canvasSize.height}
-                      scaleX={stageScale}
-                      scaleY={stageScale}
-                      x={stagePos.x}
-                      y={stagePos.y}
-                      draggable={drawTool === 'pan' && !((notes.find(n => n.id === activeNoteId)?.drawingLines || []).length > 0)}
-                      onDragEnd={(e) => {
-                        setStagePos({ x: e.target.x(), y: e.target.y() });
-                      }}
-                      onMouseDown={handlePointerDown}
-                      onMouseMove={handlePointerMove}
-                      onMouseUp={handlePointerUp}
-                      onTouchStart={handlePointerDown}
-                      onTouchMove={handlePointerMove}
-                      onTouchEnd={handlePointerUp}
-                      onWheel={handleWheel}
-                    >
-                      <Layer>
-                        <Group
-                          x={notes.find(n => n.id === activeNoteId)?.drawingOffset?.x || 0}
-                          y={notes.find(n => n.id === activeNoteId)?.drawingOffset?.y || 0}
-                          draggable={drawTool === 'pan'}
-                          onDragEnd={(e) => {
-                            e.cancelBubble = true;
-                            const currentNote = notes.find(n => n.id === activeNoteId);
-                            if (activeNoteId && currentNote?.drawingLines?.length) {
-                              saveDrawingToHistory(currentNote);
-                              // Persist the group transform on the note instead of
-                              // rewriting every stroke coordinate after each move.
-                              updateDrawingOffset(activeNoteId, {
-                                x: e.target.x(),
-                                y: e.target.y(),
-                              });
-                            }
-                          }}
-                        >
-                          {(notes.find(n => n.id === activeNoteId)?.drawingLines || []).map((line, i) => (
-                            <KonvaLine
-                              key={i}
-                              points={line.points}
-                              stroke={line.color}
-                              strokeWidth={line.strokeWidth}
-                              hitStrokeWidth={Math.max(28, line.strokeWidth)}
-                              tension={0.5}
-                              lineCap="round"
-                              lineJoin="round"
-                              globalCompositeOperation={
-                                line.tool === 'eraser' ? 'destination-out' : 'source-over'
-                              }
-                            />
-                          ))}
-                        </Group>
-                      </Layer>
-                    </Stage>
-                  </div>
                 </div>
               </div>
 
@@ -3304,8 +2691,7 @@ function NotesApp() {
                                 >
                                   <Plus size={12} className="group-hover/insert:rotate-90 transition-transform" />
                                   <span>Apply to Note</span>
-                                  <div className="w-2 h-2 rounded-full ml-1" style={{ backgroundColor: drawColor }} title={`Color: ${drawColor}`} />
-                                </button>
+                                  </button>
                               )}
                             </div>
                           </div>
@@ -3440,7 +2826,7 @@ function NotesApp() {
                         </div>
                         <p className="text-xs sm:text-sm opacity-60 line-clamp-3 leading-relaxed note-content" dangerouslySetInnerHTML={{ __html: template.content || "Visual Template" }} />
                         <div className="mt-4 sm:mt-6 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest bg-black/5 px-2.5 sm:px-3 py-1 rounded-full w-fit">
-                          {template.drawingLines?.length ? 'Sketch' : template.image ? 'Media' : 'Text'}
+                          {template.image ? 'Media' : 'Text'}
                         </div>
                       </div>
                     ))}
