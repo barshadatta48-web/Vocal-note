@@ -1434,9 +1434,6 @@ function NotesApp() {
     setOpenMenuId(null);
     setIsEditorMenuOpen(false);
     
-    // Reset canvas view
-    setStageScale(1);
-    setStagePos({ x: 0, y: 0 });
   };
 
   const saveNote = () => {
@@ -1860,7 +1857,7 @@ function NotesApp() {
   const insertChatSuggestion = (suggestion: string) => {
     if (!activeNoteId) return;
     
-    // Use the current drawing color as the "selected font color"
+    // Insert the assistant suggestion using the editor's default text color.
     const coloredText = `<span>${suggestion}</span>`;
     
     const newContent = editContent + (editContent.length > 0 && !editContent.endsWith('<br>') ? '<br><br>' : '') + coloredText;
