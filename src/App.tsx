@@ -588,6 +588,15 @@ function NotesApp() {
   const drawingId = isDrawing ? activeNoteId : null;
   const editingId = !isDrawing ? activeNoteId : null;
   const isPointerDrawingRef = useRef(false);
+  // Keep the in-progress stroke in a mutable draft and commit it at a capped
+  // frame rate. This avoids rebuilding every Konva line on every pointer event.
+  const drawingDraftRef = useRef<{
+    noteId: string;
+    lines: DrawingLine[];
+    pending: boolean;
+    frame: number | null;
+    lastCommitAt: number;
+  } | null>(null);
 
   // Ref for hidden file input
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1914,12 +1923,23 @@ function NotesApp() {
       const transform = stage.getAbsoluteTransform().copy().invert();
       const relativePos = transform.point(pos);
       
-      const newLines = [...(note?.drawingLines || []), { 
-        tool: drawTool, 
-        points: [relativePos.x, relativePos.y], 
+      const newLines = [...(note?.drawingLines || []), {
+        tool: drawTool,
+        points: [relativePos.x, relativePos.y],
         color: drawColor,
         strokeWidth: drawTool === 'eraser' ? 40 / stageScale : 4 / stageScale
       }];
+      const existingDraft = drawingDraftRef.current;
+      if (existingDraft?.frame !== null && existingDraft?.frame !== undefined) {
+        cancelAnimationFrame(existingDraft.frame);
+      }
+      drawingDraftRef.current = {
+        noteId: activeNoteId,
+        lines: newLines,
+        pending: false,
+        frame: null,
+        lastCommitAt: Date.now(),
+      };
       updateDrawing(activeNoteId, newLines);
     }
   };
@@ -1942,23 +1962,22 @@ function NotesApp() {
 
     const stage = e.target.getStage();
     const pos = stage.getPointerPosition();
-    const note = notes.find(n => n.id === activeNoteId);
-    
-    if (pos && note?.drawingLines && note.drawingLines.length > 0) {
+    const draft = drawingDraftRef.current;
+
+    if (pos && draft?.noteId === activeNoteId && draft.lines.length > 0) {
       const transform = stage.getAbsoluteTransform().copy().invert();
       const relativePos = transform.point(pos);
-      
-      const lines = [...note.drawingLines];
-      const lastLine = { ...lines[lines.length - 1] };
+      const lastLine = draft.lines[draft.lines.length - 1];
       const pts = lastLine.points;
       const lastX = pts[pts.length - 2];
       const lastY = pts[pts.length - 1];
-      
-      // Throttle negligible subpixel jitter
+
+      // Ignore tiny pointer jitter; append to the draft without triggering a
+      // React/Konva render for every hardware pointer event.
       if (Math.hypot(relativePos.x - lastX, relativePos.y - lastY) > 1.2) {
-        lastLine.points = pts.concat([relativePos.x, relativePos.y]);
-        lines[lines.length - 1] = lastLine;
-        updateDrawing(activeNoteId, lines);
+        pts.push(relativePos.x, relativePos.y);
+        draft.pending = true;
+        scheduleDrawingCommit(activeNoteId);
       }
     }
   };
@@ -2050,6 +2069,8 @@ function NotesApp() {
 
   const handlePointerUp = () => {
     isPointerDrawingRef.current = false;
+    const draft = drawingDraftRef.current;
+    if (draft) flushDrawingCommit(draft.noteId);
     lastDist = 0;
     lastCenter = null;
   };
@@ -2064,6 +2085,49 @@ function NotesApp() {
 
   const updateDrawing = (id: string, lines: DrawingLine[]) => {
     setNotes(prev => prev.map(n => n.id === id ? { ...n, drawingLines: lines, updatedAt: Date.now() } : n));
+  };
+
+  const flushDrawingCommit = (noteId: string) => {
+    const draft = drawingDraftRef.current;
+    if (!draft || draft.noteId !== noteId) return;
+    if (draft.frame !== null) {
+      cancelAnimationFrame(draft.frame);
+      draft.frame = null;
+    }
+    if (!draft.pending) return;
+
+    const lastIndex = draft.lines.length - 1;
+    const lastLine = draft.lines[lastIndex];
+    // Commit immutable copies so React state is never mutated by later input.
+    const committedLines = [
+      ...draft.lines.slice(0, lastIndex),
+      { ...lastLine, points: [...lastLine.points] },
+    ];
+    draft.pending = false;
+    draft.lastCommitAt = Date.now();
+    updateDrawing(noteId, committedLines);
+  };
+
+  const scheduleDrawingCommit = (noteId: string) => {
+    const draft = drawingDraftRef.current;
+    if (!draft || draft.noteId !== noteId || draft.frame !== null) return;
+
+    const commitOnFrame = () => {
+      const currentDraft = drawingDraftRef.current;
+      if (!currentDraft || currentDraft.noteId !== noteId) return;
+      currentDraft.frame = null;
+      if (!currentDraft.pending) return;
+
+      // Cap expensive React/Konva updates to roughly 30 per second while still
+      // collecting every meaningful pointer coordinate in the draft.
+      if (Date.now() - currentDraft.lastCommitAt < 32) {
+        currentDraft.frame = requestAnimationFrame(commitOnFrame);
+        return;
+      }
+      flushDrawingCommit(noteId);
+    };
+
+    draft.frame = requestAnimationFrame(commitOnFrame);
   };
 
   const updateDrawingOffset = (id: string, offset: { x: number; y: number }) => {
