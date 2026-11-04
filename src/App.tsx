@@ -1232,7 +1232,7 @@ function NotesApp() {
                 ageMs < 5000;
 
               if (isCumulativeUpdate) {
-                const previousWordCount = last.text.split(/\\s+/).length;
+                const previousWordCount = last.text.split(/\s+/).length;
                 const allWords = transcript.trim().split(/\\s+/);
                 const deltaWords = allWords.slice(previousWordCount);
                 if (deltaWords.length > 0) {
