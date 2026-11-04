@@ -720,18 +720,17 @@ function NotesApp() {
     };
   }, []);
 
-  // Save to localStorage and IndexedDB snapshot ONLY AFTER initial load has completed
+  // Persist one complete snapshot after hydration. A single effect prevents
+  // separate note/template effects from scheduling competing partial snapshots.
   useEffect(() => {
     if (!isStorageLoaded) return;
-    safeSetItem('stickie-notes-rainbow', JSON.stringify(notes));
-    saveOfflineSnapshot(notes, templates);
-  }, [notes, isStorageLoaded]);
 
-  useEffect(() => {
-    if (!isStorageLoaded) return;
-    safeSetItem('stickie-templates-rainbow', JSON.stringify(templates));
-    saveOfflineSnapshot(notes, templates);
-  }, [templates, isStorageLoaded]);
+    const notesJson = JSON.stringify(notes);
+    const templatesJson = JSON.stringify(templates);
+    safeSetItem('stickie-notes-rainbow', notesJson);
+    safeSetItem('stickie-templates-rainbow', templatesJson);
+    void saveOfflineSnapshot(notes, templates);
+  }, [notes, templates, isStorageLoaded]);
 
   useEffect(() => {
     if (!isStorageLoaded) return;
