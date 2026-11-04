@@ -1243,6 +1243,7 @@ function NotesApp() {
               handleInsertFinalText(chunkToProcess, target);
               setLiveInterimText('');
               liveInterimRef.current = '';
+            }
           }
         } else {
           interimTranscript += (interimTranscript ? ' ' : '') + transcript;
