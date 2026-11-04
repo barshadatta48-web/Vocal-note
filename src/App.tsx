@@ -1187,24 +1187,28 @@ function NotesApp() {
 
             const now = Date.now();
             const last = lastFinalUtteranceRef.current;
-            const isRecentDuplicate = last.text === normalized && (now - last.time < 5000);
+            const ageMs = now - last.time;
+            const isRecentDuplicate =
+              last.text === normalized && ageMs >= 0 && ageMs < 5000;
+            const isStaleCumulativeRepeat =
+              last.text.length > normalized.length &&
+              last.text.startsWith(normalized) &&
+              ageMs >= 0 &&
+              ageMs < 5000;
 
-            if (!isRecentDuplicate) {
-              lastFinalUtteranceRef.current = { text: normalized, time: now };
-
-              // Check if utterance is a voice command
+            if (!isRecentDuplicate && !isStaleCumulativeRepeat) {
+              // Check commands before inserting ordinary transcript text.
               const cmdResult = detectVoiceCommand(transcript);
 
               if (cmdResult.isPureCommand && cmdResult.command) {
-                // Execute standalone command directly (e.g. "Next line", "Next paragraph", "Delete that", "Stop listening")
                 executeVoiceCommand(cmdResult.command, target);
+                lastFinalUtteranceRef.current = { text: normalized, time: now };
                 setLiveInterimText('');
                 liveInterimRef.current = '';
                 continue;
               }
 
               if (cmdResult.segments && cmdResult.segments.length > 0) {
-                // Utterance with mixed text and command(s)
                 for (const seg of cmdResult.segments) {
                   if (seg.type === 'command' && seg.command) {
                     executeVoiceCommand(seg.command, target);
@@ -1212,26 +1216,36 @@ function NotesApp() {
                     handleInsertFinalText(seg.content, target);
                   }
                 }
+                lastFinalUtteranceRef.current = { text: normalized, time: now };
                 setLiveInterimText('');
                 liveInterimRef.current = '';
                 continue;
               }
 
-              // Normal text utterance: handle suffix delta if cumulative
+              // Mobile speech engines can resend a prior final phrase with
+              // additional words appended. Insert only the new suffix.
               let chunkToAdd = transcript;
-              if (last.text && normalized.startsWith(last.text) && normalized.length > last.text.length) {
-                const prevWords = last.text.split(/\s+/).length;
-                const allWords = transcript.split(/\s+/);
-                const deltaWords = allWords.slice(prevWords);
+              const isCumulativeUpdate =
+                last.text.length > 0 &&
+                normalized.startsWith(last.text + ' ') &&
+                ageMs >= 0 &&
+                ageMs < 5000;
+
+              if (isCumulativeUpdate) {
+                const previousWordCount = last.text.split(/\\s+/).length;
+                const allWords = transcript.trim().split(/\\s+/);
+                const deltaWords = allWords.slice(previousWordCount);
                 if (deltaWords.length > 0) {
                   chunkToAdd = deltaWords.join(' ');
                 }
               }
 
-              handleInsertFinalText(chunkToAdd, target);
+              if (chunkToAdd.trim()) {
+                handleInsertFinalText(chunkToAdd, target);
+              }
+              lastFinalUtteranceRef.current = { text: normalized, time: now };
               setLiveInterimText('');
               liveInterimRef.current = '';
-            }
           }
         } else {
           interimTranscript += (interimTranscript ? ' ' : '') + transcript;
