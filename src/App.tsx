@@ -1187,16 +1187,40 @@ function NotesApp() {
 
             const now = Date.now();
             const last = lastFinalUtteranceRef.current;
-            const isRecentDuplicate = last.text === normalized && (now - last.time < 5000);
+            const ageMs = now - last.time;
+            const isRecentDuplicate =
+              last.text === normalized && ageMs >= 0 && ageMs < 5000;
+            const isStaleCumulativeRepeat =
+              last.text.length > normalized.length &&
+              last.text.startsWith(normalized) &&
+              ageMs >= 0 &&
+              ageMs < 5000;
 
-            if (!isRecentDuplicate) {
+            if (!isRecentDuplicate && !isStaleCumulativeRepeat) {
+              // Mobile engines may resend earlier final words with a new suffix.
+              // Reduce cumulative updates before checking commands, so neither
+              // dictated text nor commands are replayed.
+              let chunkToProcess = transcript;
+              const isCumulativeUpdate =
+                last.text.length > 0 &&
+                normalized.startsWith(last.text + ' ') &&
+                ageMs >= 0 &&
+                ageMs < 5000;
+
+              if (isCumulativeUpdate) {
+                const previousWordCount = last.text.split(/\s+/).length;
+                const allWords = transcript.trim().split(/\s+/);
+                chunkToProcess = allWords.slice(previousWordCount).join(' ');
+              }
+
               lastFinalUtteranceRef.current = { text: normalized, time: now };
+              if (!chunkToProcess.trim()) {
+                continue;
+              }
 
-              // Check if utterance is a voice command
-              const cmdResult = detectVoiceCommand(transcript);
-
+              const cmdResult = detectVoiceCommand(chunkToProcess);
               if (cmdResult.isPureCommand && cmdResult.command) {
-                // Execute standalone command directly (e.g. "Next line", "Next paragraph", "Delete that", "Stop listening")
+                // Commands are actions, never literal note/chat text.
                 executeVoiceCommand(cmdResult.command, target);
                 setLiveInterimText('');
                 liveInterimRef.current = '';
@@ -1204,7 +1228,6 @@ function NotesApp() {
               }
 
               if (cmdResult.segments && cmdResult.segments.length > 0) {
-                // Utterance with mixed text and command(s)
                 for (const seg of cmdResult.segments) {
                   if (seg.type === 'command' && seg.command) {
                     executeVoiceCommand(seg.command, target);
@@ -1217,18 +1240,7 @@ function NotesApp() {
                 continue;
               }
 
-              // Normal text utterance: handle suffix delta if cumulative
-              let chunkToAdd = transcript;
-              if (last.text && normalized.startsWith(last.text) && normalized.length > last.text.length) {
-                const prevWords = last.text.split(/\s+/).length;
-                const allWords = transcript.split(/\s+/);
-                const deltaWords = allWords.slice(prevWords);
-                if (deltaWords.length > 0) {
-                  chunkToAdd = deltaWords.join(' ');
-                }
-              }
-
-              handleInsertFinalText(chunkToAdd, target);
+              handleInsertFinalText(chunkToProcess, target);
               setLiveInterimText('');
               liveInterimRef.current = '';
             }
