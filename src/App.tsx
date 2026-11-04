@@ -3123,6 +3123,7 @@ function NotesApp() {
                           y={notes.find(n => n.id === activeNoteId)?.drawingOffset?.y || 0}
                           draggable={drawTool === 'pan'}
                           onDragEnd={(e) => {
+                            e.cancelBubble = true;
                             const currentNote = notes.find(n => n.id === activeNoteId);
                             if (activeNoteId && currentNote?.drawingLines?.length) {
                               saveDrawingToHistory(currentNote);
