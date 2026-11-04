@@ -1197,12 +1197,31 @@ function NotesApp() {
               ageMs < 5000;
 
             if (!isRecentDuplicate && !isStaleCumulativeRepeat) {
-              // Check commands before inserting ordinary transcript text.
-              const cmdResult = detectVoiceCommand(transcript);
+              // Mobile engines may resend earlier final words with a new suffix.
+              // Reduce cumulative updates before checking commands, so neither
+              // dictated text nor commands are replayed.
+              let chunkToProcess = transcript;
+              const isCumulativeUpdate =
+                last.text.length > 0 &&
+                normalized.startsWith(last.text + ' ') &&
+                ageMs >= 0 &&
+                ageMs < 5000;
 
+              if (isCumulativeUpdate) {
+                const previousWordCount = last.text.split(/\s+/).length;
+                const allWords = transcript.trim().split(/\s+/);
+                chunkToProcess = allWords.slice(previousWordCount).join(' ');
+              }
+
+              lastFinalUtteranceRef.current = { text: normalized, time: now };
+              if (!chunkToProcess.trim()) {
+                continue;
+              }
+
+              const cmdResult = detectVoiceCommand(chunkToProcess);
               if (cmdResult.isPureCommand && cmdResult.command) {
+                // Commands are actions, never literal note/chat text.
                 executeVoiceCommand(cmdResult.command, target);
-                lastFinalUtteranceRef.current = { text: normalized, time: now };
                 setLiveInterimText('');
                 liveInterimRef.current = '';
                 continue;
@@ -1216,34 +1235,12 @@ function NotesApp() {
                     handleInsertFinalText(seg.content, target);
                   }
                 }
-                lastFinalUtteranceRef.current = { text: normalized, time: now };
                 setLiveInterimText('');
                 liveInterimRef.current = '';
                 continue;
               }
 
-              // Mobile speech engines can resend a prior final phrase with
-              // additional words appended. Insert only the new suffix.
-              let chunkToAdd = transcript;
-              const isCumulativeUpdate =
-                last.text.length > 0 &&
-                normalized.startsWith(last.text + ' ') &&
-                ageMs >= 0 &&
-                ageMs < 5000;
-
-              if (isCumulativeUpdate) {
-                const previousWordCount = last.text.split(/\s+/).length;
-                const allWords = transcript.trim().split(/\\s+/);
-                const deltaWords = allWords.slice(previousWordCount);
-                if (deltaWords.length > 0) {
-                  chunkToAdd = deltaWords.join(' ');
-                }
-              }
-
-              if (chunkToAdd.trim()) {
-                handleInsertFinalText(chunkToAdd, target);
-              }
-              lastFinalUtteranceRef.current = { text: normalized, time: now };
+              handleInsertFinalText(chunkToProcess, target);
               setLiveInterimText('');
               liveInterimRef.current = '';
           }
