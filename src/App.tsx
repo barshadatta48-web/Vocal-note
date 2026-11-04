@@ -1933,13 +1933,22 @@ function NotesApp() {
       if (existingDraft?.frame !== null && existingDraft?.frame !== undefined) {
         cancelAnimationFrame(existingDraft.frame);
       }
-      drawingDraftRef.current = {
-        noteId: activeNoteId,
-        lines: newLines,
-        pending: false,
-        frame: null,
-        lastCommitAt: Date.now(),
-      };
+      if (drawTool === 'eraser') {
+        // Keep the mutable eraser draft separate from the immutable React state.
+        const draftLines = [
+          ...newLines.slice(0, -1),
+          { ...newLines[newLines.length - 1], points: [...newLines[newLines.length - 1].points] },
+        ];
+        drawingDraftRef.current = {
+          noteId: activeNoteId,
+          lines: draftLines,
+          pending: false,
+          frame: null,
+          lastCommitAt: Date.now(),
+        };
+      } else {
+        drawingDraftRef.current = null;
+      }
       updateDrawing(activeNoteId, newLines);
     }
   };
@@ -1964,7 +1973,7 @@ function NotesApp() {
     const pos = stage.getPointerPosition();
     const draft = drawingDraftRef.current;
 
-    if (pos && draft?.noteId === activeNoteId && draft.lines.length > 0) {
+    if (pos && drawTool === 'eraser' && draft?.noteId === activeNoteId && draft.lines.length > 0) {
       const transform = stage.getAbsoluteTransform().copy().invert();
       const relativePos = transform.point(pos);
       const lastLine = draft.lines[draft.lines.length - 1];
@@ -1978,6 +1987,21 @@ function NotesApp() {
         pts.push(relativePos.x, relativePos.y);
         draft.pending = true;
         scheduleDrawingCommit(activeNoteId);
+      }
+    } else if (pos && drawTool !== 'eraser' && note?.drawingLines?.length) {
+      // Preserve the existing pen behaviour; only the expensive eraser path
+      // uses batched commits.
+      const transform = stage.getAbsoluteTransform().copy().invert();
+      const relativePos = transform.point(pos);
+      const lines = [...note.drawingLines];
+      const lastLine = { ...lines[lines.length - 1] };
+      const pts = lastLine.points;
+      const lastX = pts[pts.length - 2];
+      const lastY = pts[pts.length - 1];
+      if (Math.hypot(relativePos.x - lastX, relativePos.y - lastY) > 1.2) {
+        lastLine.points = pts.concat([relativePos.x, relativePos.y]);
+        lines[lines.length - 1] = lastLine;
+        updateDrawing(activeNoteId, lines);
       }
     }
   };
