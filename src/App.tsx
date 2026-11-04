@@ -29,6 +29,11 @@ interface DrawingLine {
   strokeWidth: number;
 }
 
+interface DrawingSnapshot {
+  lines: DrawingLine[];
+  offset: { x: number; y: number };
+}
+
 interface Note {
   id: string;
   content: string; // HTML content
@@ -40,6 +45,7 @@ interface Note {
   image?: string;
   completed?: boolean;
   drawingLines?: DrawingLine[];
+  drawingOffset?: { x: number; y: number };
   fontSize?: number;
   updatedAt?: number | Date | string;
 }
@@ -577,8 +583,8 @@ function NotesApp() {
 
   // Drawing state
   const [isDrawing, setIsDrawing] = useState(false);
-  const [drawingHistory, setDrawingHistory] = useState<DrawingLine[][]>([]);
-  const [drawingRedoStack, setDrawingRedoStack] = useState<DrawingLine[][]>([]);
+  const [drawingHistory, setDrawingHistory] = useState<DrawingSnapshot[]>([]);
+  const [drawingRedoStack, setDrawingRedoStack] = useState<DrawingSnapshot[]>([]);
   const drawingId = isDrawing ? activeNoteId : null;
   const editingId = !isDrawing ? activeNoteId : null;
   const isPointerDrawingRef = useRef(false);
@@ -1891,7 +1897,10 @@ function NotesApp() {
 
     const note = notes.find(n => n.id === activeNoteId);
     if (note) {
-      setDrawingHistory(prev => [...prev.slice(-25), note.drawingLines || []]);
+      setDrawingHistory(prev => [...prev.slice(-25), {
+        lines: note.drawingLines || [],
+        offset: note.drawingOffset || { x: 0, y: 0 },
+      }]);
       setDrawingRedoStack([]);
     }
 
@@ -2045,8 +2054,11 @@ function NotesApp() {
     lastCenter = null;
   };
 
-  const saveDrawingToHistory = (lines: DrawingLine[]) => {
-    setDrawingHistory(prev => [...prev.slice(-25), lines]);
+  const saveDrawingToHistory = (note: Note) => {
+    setDrawingHistory(prev => [...prev.slice(-25), {
+      lines: note.drawingLines || [],
+      offset: note.drawingOffset || { x: 0, y: 0 },
+    }]);
     setDrawingRedoStack([]);
   };
 
@@ -2054,33 +2066,51 @@ function NotesApp() {
     setNotes(prev => prev.map(n => n.id === id ? { ...n, drawingLines: lines, updatedAt: Date.now() } : n));
   };
 
+  const updateDrawingOffset = (id: string, offset: { x: number; y: number }) => {
+    setNotes(prev => prev.map(n => n.id === id ? { ...n, drawingOffset: offset, updatedAt: Date.now() } : n));
+  };
+
+  const applyDrawingSnapshot = (id: string, snapshot: DrawingSnapshot) => {
+    setNotes(prev => prev.map(n => n.id === id
+      ? { ...n, drawingLines: snapshot.lines, drawingOffset: snapshot.offset, updatedAt: Date.now() }
+      : n
+    ));
+  };
+
   const undoDrawing = () => {
     if (!activeNoteId || drawingHistory.length === 0) return;
     const currentNote = notes.find(n => n.id === activeNoteId);
-    const currentLines = currentNote?.drawingLines || [];
-
-    const previousLines = drawingHistory[drawingHistory.length - 1];
+    const currentSnapshot: DrawingSnapshot = {
+      lines: currentNote?.drawingLines || [],
+      offset: currentNote?.drawingOffset || { x: 0, y: 0 },
+    };
+    const previousSnapshot = drawingHistory[drawingHistory.length - 1];
     setDrawingHistory(prev => prev.slice(0, -1));
-    setDrawingRedoStack(prev => [...prev.slice(-25), currentLines]);
-    updateDrawing(activeNoteId, previousLines);
+    setDrawingRedoStack(prev => [...prev.slice(-25), currentSnapshot]);
+    applyDrawingSnapshot(activeNoteId, previousSnapshot);
   };
 
   const redoDrawing = () => {
     if (!activeNoteId || drawingRedoStack.length === 0) return;
     const currentNote = notes.find(n => n.id === activeNoteId);
-    const currentLines = currentNote?.drawingLines || [];
-
-    const nextLines = drawingRedoStack[drawingRedoStack.length - 1];
+    const currentSnapshot: DrawingSnapshot = {
+      lines: currentNote?.drawingLines || [],
+      offset: currentNote?.drawingOffset || { x: 0, y: 0 },
+    };
+    const nextSnapshot = drawingRedoStack[drawingRedoStack.length - 1];
     setDrawingRedoStack(prev => prev.slice(0, -1));
-    setDrawingHistory(prev => [...prev.slice(-25), currentLines]);
-    updateDrawing(activeNoteId, nextLines);
+    setDrawingHistory(prev => [...prev.slice(-25), currentSnapshot]);
+    applyDrawingSnapshot(activeNoteId, nextSnapshot);
   };
 
   const clearDrawing = (id: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
     const note = notes.find(n => n.id === id);
     if (note && note.drawingLines && note.drawingLines.length > 0) {
-      setDrawingHistory(prev => [...prev.slice(-25), note.drawingLines]);
+      setDrawingHistory(prev => [...prev.slice(-25), {
+        lines: note.drawingLines || [],
+        offset: note.drawingOffset || { x: 0, y: 0 },
+      }]);
       setDrawingRedoStack([]);
     }
     setNotes(prev => prev.map(n => n.id === id ? { ...n, drawingLines: [], updatedAt: Date.now() } : n));
@@ -2512,20 +2542,22 @@ function NotesApp() {
                       <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
                         <Stage width={280} height={220} className="w-full h-full">
                           <Layer>
-                            {note.drawingLines.map((line, i) => (
-                              <KonvaLine
-                                key={i}
-                                points={line.points}
-                                stroke={line.color}
-                                strokeWidth={line.strokeWidth}
-                                tension={0.5}
-                                lineCap="round"
-                                lineJoin="round"
-                                globalCompositeOperation={
-                                  line.tool === 'eraser' ? 'destination-out' : 'source-over'
-                                }
-                              />
-                            ))}
+                            <Group x={note.drawingOffset?.x || 0} y={note.drawingOffset?.y || 0}>
+                              {note.drawingLines.map((line, i) => (
+                                <KonvaLine
+                                  key={i}
+                                  points={line.points}
+                                  stroke={line.color}
+                                  strokeWidth={line.strokeWidth}
+                                  tension={0.5}
+                                  lineCap="round"
+                                  lineJoin="round"
+                                  globalCompositeOperation={
+                                    line.tool === 'eraser' ? 'destination-out' : 'source-over'
+                                  }
+                                />
+                              ))}
+                            </Group>
                           </Layer>
                         </Stage>
                       </div>
@@ -3087,22 +3119,20 @@ function NotesApp() {
                     >
                       <Layer>
                         <Group
+                          x={notes.find(n => n.id === activeNoteId)?.drawingOffset?.x || 0}
+                          y={notes.find(n => n.id === activeNoteId)?.drawingOffset?.y || 0}
                           draggable={drawTool === 'pan'}
                           onDragEnd={(e) => {
-                            const dx = e.target.x();
-                            const dy = e.target.y();
-                            if (dx !== 0 || dy !== 0) {
-                              const currentNote = notes.find(n => n.id === activeNoteId);
-                              if (currentNote?.drawingLines && currentNote.drawingLines.length > 0) {
-                                saveDrawingToHistory(currentNote.drawingLines);
-                                const updatedLines = currentNote.drawingLines.map(line => ({
-                                  ...line,
-                                  points: line.points.map((val, idx) => idx % 2 === 0 ? val + dx : val + dy)
-                                }));
-                                updateDrawing(activeNoteId, updatedLines);
-                              }
-                              e.target.position({ x: 0, y: 0 });
-                              e.target.getStage()?.batchDraw();
+                            e.cancelBubble = true;
+                            const currentNote = notes.find(n => n.id === activeNoteId);
+                            if (activeNoteId && currentNote?.drawingLines?.length) {
+                              saveDrawingToHistory(currentNote);
+                              // Persist the group transform on the note instead of
+                              // rewriting every stroke coordinate after each move.
+                              updateDrawingOffset(activeNoteId, {
+                                x: e.target.x(),
+                                y: e.target.y(),
+                              });
                             }
                           }}
                         >
