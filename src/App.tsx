@@ -1971,6 +1971,7 @@ function NotesApp() {
 
     const stage = e.target.getStage();
     const pos = stage.getPointerPosition();
+    const note = notes.find(n => n.id === activeNoteId);
     const draft = drawingDraftRef.current;
 
     if (pos && drawTool === 'eraser' && draft?.noteId === activeNoteId && draft.lines.length > 0) {
