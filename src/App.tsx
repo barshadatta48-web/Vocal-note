@@ -28,6 +28,7 @@ interface DrawingLine {
   strokeWidth: number;
 }
 
+// Legacy drawing fields are retained only so older backups still load safely.
 interface Note {
   id: string;
   content: string; // HTML content
@@ -1433,7 +1434,6 @@ function NotesApp() {
     setEditFontSize(note.fontSize || 48);
     setOpenMenuId(null);
     setIsEditorMenuOpen(false);
-    
   };
 
   const saveNote = () => {
@@ -2688,7 +2688,7 @@ function NotesApp() {
                                 >
                                   <Plus size={12} className="group-hover/insert:rotate-90 transition-transform" />
                                   <span>Apply to Note</span>
-                                  </button>
+                                 </button>
                               )}
                             </div>
                           </div>
