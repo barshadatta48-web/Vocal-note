@@ -12,6 +12,7 @@ import {
   SequentialFlowStep,
   generateInitialsAvatar,
 } from '../types/auth';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
 interface AuthContextType {
   user: UserProfile | null;
@@ -27,6 +28,7 @@ interface AuthContextType {
   isProfileDrawerOpen: boolean;
   isStudentVerificationModalOpen: boolean;
   login: (email: string, password: string, rememberMe?: boolean) => Promise<boolean>;
+  sendPasswordReset: (email: string) => Promise<boolean>;
   signup: (name: string, email: string, password: string) => Promise<boolean>;
   socialLogin: (provider: 'google' | 'github') => Promise<boolean>;
   logout: () => void;
@@ -196,130 +198,115 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
    * 5. If valid: restores session state and user profile without UI flicker.
    */
   useEffect(() => {
-    let isMounted = true;
+    let mounted = true;
 
-    const rehydrateSession = async () => {
-      try {
-        await new Promise((resolve) => setTimeout(resolve, 150));
-
-        // Check for any pending notification in storage
-        const storedNotif = localStorage.getItem(STORAGE_KEY_NOTIFICATION);
-        if (storedNotif) {
-          try {
-            const parsedNotif = JSON.parse(storedNotif);
-            if (isMounted) setNotification(parsedNotif);
-          } catch {
-            if (isMounted) setNotification({ type: 'warning', message: storedNotif });
-          }
-          localStorage.removeItem(STORAGE_KEY_NOTIFICATION);
-        }
-
-        const storedToken = localStorage.getItem(STORAGE_KEY_TOKEN);
-        const storedSessionJson = localStorage.getItem(STORAGE_KEY_SESSION);
-        const storedUserJson = localStorage.getItem(STORAGE_KEY_USER);
-        const storedOnboarded = localStorage.getItem(STORAGE_KEY_ONBOARDED);
-
-        if (!storedToken || !storedSessionJson || !storedUserJson) {
-          if (isMounted) {
-            setUser(null);
-            setSession(null);
-            setAuthStatus('unauthenticated');
-            setIsOnboarded(false);
-            setIsRehydrating(false);
-          }
-          return;
-        }
-
-        let parsedSession: AuthSession;
-        let parsedUser: UserProfile;
-        try {
-          parsedSession = JSON.parse(storedSessionJson);
-          parsedUser = JSON.parse(storedUserJson);
-        } catch {
-          throw new Error('Corrupted auth session JSON in localStorage');
-        }
-
-        // Validate session token matching & expiration
-        const now = Date.now();
-        if (parsedSession.token !== storedToken || parsedSession.expiresAt <= now) {
-          console.warn('[Auth] Expired or invalid session token detected during rehydration');
-          localStorage.removeItem(STORAGE_KEY_TOKEN);
-          localStorage.removeItem(STORAGE_KEY_SESSION);
-          localStorage.removeItem(STORAGE_KEY_USER);
-          localStorage.removeItem(STORAGE_KEY_ONBOARDED);
-
-          if (isMounted) {
-            setUser(null);
-            setSession(null);
-            setAuthStatus('unauthenticated');
-            setIsOnboarded(false);
-            setNotification({
-              type: 'warning',
-              message: 'Your previous session has expired. Please sign in to continue.',
-            });
-            setIsRehydrating(false);
-          }
-          return;
-        }
-
-        // Token is valid and non-expired: restore authenticated session with resilient property mappings
-        const resolvedName =
-          parsedUser.name ||
-          parsedUser.displayName ||
-          parsedUser.full_name ||
-          parsedUser.user_metadata?.full_name ||
-          parsedUser.user_metadata?.name ||
-          (parsedUser.email ? parsedUser.email.split('@')[0] : 'User');
-
-        const resolvedAvatar =
-          parsedUser.avatar ||
-          parsedUser.avatar_url ||
-          parsedUser.user_metadata?.avatar_url ||
-          generateInitialsAvatar(resolvedName);
-
-        const normalizedUser: UserProfile = {
-          ...parsedUser,
-          name: resolvedName,
-          displayName: resolvedName,
-          full_name: resolvedName,
-          avatar: resolvedAvatar,
-          avatar_url: resolvedAvatar,
-          user_metadata: {
-            ...(parsedUser.user_metadata || {}),
-            full_name: resolvedName,
-            name: resolvedName,
-            email: parsedUser.email,
-            avatar_url: resolvedAvatar,
-          },
-        };
-
-        if (isMounted) {
-          setUser(normalizedUser);
-          setSession(parsedSession);
-          setAuthStatus('authenticated');
-          setIsOnboarded(storedOnboarded === 'true');
-          setIsRehydrating(false);
-        }
-      } catch (err) {
-        console.error('[Auth] Failed to rehydrate session:', err);
-        localStorage.removeItem(STORAGE_KEY_TOKEN);
-        localStorage.removeItem(STORAGE_KEY_SESSION);
-        localStorage.removeItem(STORAGE_KEY_USER);
-
-        if (isMounted) {
-          setUser(null);
-          setSession(null);
-          setAuthStatus('unauthenticated');
-          setIsOnboarded(false);
-          setIsRehydrating(false);
-        }
+    const applySupabaseSession = (authSession: any) => {
+      if (!mounted) return;
+      if (!authSession?.user) {
+        setUser(null);
+        setSession(null);
+        setAuthStatus('unauthenticated');
+        setIsOnboarded(false);
+        setIsRehydrating(false);
+        return;
       }
+
+      const authUser = authSession.user;
+      const metadata = authUser.user_metadata || {};
+      const cachedRaw = localStorage.getItem(STORAGE_KEY_USER);
+      let cached: UserProfile | null = null;
+      try {
+        const parsed = cachedRaw ? JSON.parse(cachedRaw) : null;
+        if (parsed?.id === authUser.id) cached = parsed;
+      } catch {
+        localStorage.removeItem(STORAGE_KEY_USER);
+      }
+
+      const resolvedName =
+        metadata.full_name || metadata.name || cached?.name ||
+        (authUser.email ? authUser.email.split('@')[0] : 'User');
+      const resolvedAvatar =
+        metadata.avatar_url || metadata.picture || cached?.avatar ||
+        generateInitialsAvatar(resolvedName);
+      const profile: UserProfile = {
+        id: authUser.id,
+        name: resolvedName,
+        displayName: resolvedName,
+        full_name: resolvedName,
+        user_metadata: { ...metadata, full_name: resolvedName, name: resolvedName, email: authUser.email, avatar_url: resolvedAvatar },
+        email: authUser.email || '',
+        role: metadata.role || cached?.role || 'Creator & Thinker',
+        avatar: resolvedAvatar,
+        avatar_url: resolvedAvatar,
+        teamSize: metadata.team_size || cached?.teamSize || 'Solo Thinker',
+        useCase: metadata.use_case || cached?.useCase || 'Voice Ideation',
+        themePreference: metadata.theme_preference || cached?.themePreference || 'Ocean Teal',
+        subscriptionTier: 'free',
+        subscription_plan: 'free',
+        billingCycle: 'monthly',
+        isFirstLogin: false,
+        createdAt: authUser.created_at || new Date().toISOString(),
+        // Student status is not trusted from browser storage or user-editable metadata.
+        is_student: false,
+        student_verification_status: 'none',
+        institution_name: '',
+      };
+      const nextSession: AuthSession = {
+        token: authSession.access_token,
+        refreshToken: authSession.refresh_token,
+        expiresAt: (authSession.expires_at || (Date.now() / 1000 + (authSession.expires_in || 3600))) * 1000,
+        issuedAt: Date.now(),
+        userId: authUser.id,
+        role: profile.role,
+      };
+
+      try {
+        localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(profile));
+        localStorage.setItem(STORAGE_KEY_ONBOARDED, 'true');
+      } catch (storageError) {
+        console.warn('[Auth] Could not cache user profile:', storageError);
+      }
+      setUser(profile);
+      setSession(nextSession);
+      setAuthStatus('authenticated');
+      setIsOnboarded(true);
+      setHasCompletedProfileSetup(true);
+      setIsRehydrating(false);
     };
 
-    rehydrateSession();
+    if (!isSupabaseConfigured || !supabase) {
+      setUser(null);
+      setSession(null);
+      setAuthStatus('unauthenticated');
+      setIsRehydrating(false);
+      setNotification({
+        type: 'error',
+        message: 'Authentication is not configured yet. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to the deployment environment.',
+      });
+      return () => { mounted = false; };
+    }
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, authSession) => {
+      applySupabaseSession(authSession);
+    });
+
+    supabase.auth.getSession().then(({ data, error }) => {
+      if (error) throw error;
+      applySupabaseSession(data.session);
+    }).catch((error) => {
+      console.error('[Auth] Supabase session verification failed:', error);
+      if (mounted) {
+        setUser(null);
+        setSession(null);
+        setAuthStatus('unauthenticated');
+        setIsRehydrating(false);
+        setNotification({ type: 'error', message: 'Unable to verify your session. Please sign in again.' });
+      }
+    });
 
     return () => {
-      isMounted = false;
+      mounted = false;
+      authListener.subscription.unsubscribe();
     };
   }, []);
 
@@ -330,6 +317,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const expireSession = useCallback((reason = 'Session expired. Please log in again.') => {
     console.warn('[Auth] Expiring session:', reason);
+    if (supabase) void supabase.auth.signOut();
     localStorage.removeItem(STORAGE_KEY_TOKEN);
     localStorage.removeItem(STORAGE_KEY_SESSION);
     localStorage.removeItem(STORAGE_KEY_USER);
@@ -365,280 +353,70 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [expireSession]);
 
-  const login = async (email: string, _password: string, rememberMe = true): Promise<boolean> => {
-    const token = `vocal_sess_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-    const expiresAt = Date.now() + 24 * 60 * 60 * 1000;
-    const cleanEmail = email.trim().toLowerCase();
-
-    // Derive formatted display name from email prefix
-    const emailPrefix = cleanEmail.split('@')[0];
-    const nameSegments = emailPrefix.split(/[._-]/).filter(Boolean);
-    const fallbackName = nameSegments.length > 0
-      ? nameSegments.map((seg) => seg.charAt(0).toUpperCase() + seg.slice(1).toLowerCase()).join(' ')
-      : 'User';
-
-    let resolvedName = fallbackName;
-    let resolvedAvatar = '';
-    let resolvedRole = 'Creator & Thinker';
-    let resolvedUseCase = 'Voice Ideation';
-    let resolvedTheme = 'Ocean Teal';
-    let resolvedTier: SubscriptionTier = 'base';
-    let isStudent = false;
-    let studentStatus: StudentVerificationStatus = 'none';
-    let institutionName = '';
-
-    // 1. Check persistent user registry for this email
-    const registry = getStoredUserRegistry();
-    const existingUser = registry[cleanEmail];
-    if (existingUser) {
-      resolvedName =
-        existingUser.name ||
-        existingUser.displayName ||
-        existingUser.full_name ||
-        existingUser.user_metadata?.full_name ||
-        existingUser.user_metadata?.name ||
-        resolvedName;
-      resolvedAvatar =
-        existingUser.avatar ||
-        existingUser.avatar_url ||
-        existingUser.user_metadata?.avatar_url ||
-        '';
-      resolvedRole = existingUser.role || resolvedRole;
-      resolvedUseCase = existingUser.useCase || resolvedUseCase;
-      resolvedTheme = existingUser.themePreference || resolvedTheme;
-      resolvedTier = existingUser.subscriptionTier || resolvedTier;
-      isStudent = Boolean(existingUser.is_student);
-      studentStatus = existingUser.student_verification_status || (isStudent ? 'verified' : 'none');
-      institutionName = existingUser.institution_name || '';
-    }
-
-    // 2. Check draftProfile from Step 2 if user setup their profile in onboarding
-    if (draftProfile?.name) {
-      resolvedName = draftProfile.name;
-      if (draftProfile.avatar) resolvedAvatar = draftProfile.avatar;
-      if (draftProfile.role) resolvedRole = draftProfile.role;
-      if (draftProfile.useCase) resolvedUseCase = draftProfile.useCase;
-      if (draftProfile.themePreference) resolvedTheme = draftProfile.themePreference;
-      if (draftProfile.isStudent) {
-        isStudent = true;
-        studentStatus = 'verified';
-        institutionName = 'Academic Institution';
-      }
-    }
-
-    // 3. Fallback for default email
-    if (cleanEmail === DEFAULT_DEMO_USER.email.toLowerCase() && !existingUser && !draftProfile?.name) {
-      resolvedName = DEFAULT_DEMO_USER.name;
-      resolvedRole = DEFAULT_DEMO_USER.role;
-      resolvedTier = DEFAULT_DEMO_USER.subscriptionTier;
-    }
-
-    // Automatically assign default initials avatar if none exists
-    if (!resolvedAvatar || resolvedAvatar.includes('unsplash')) {
-      resolvedAvatar = generateInitialsAvatar(resolvedName);
-    }
-
-    const profile: UserProfile = {
-      id: existingUser?.id || `usr_${Date.now()}`,
-      name: resolvedName,
-      displayName: resolvedName,
-      full_name: resolvedName,
-      user_metadata: {
-        full_name: resolvedName,
-        name: resolvedName,
-        email: cleanEmail,
-        avatar_url: resolvedAvatar,
-      },
-      email: cleanEmail,
-      role: resolvedRole,
-      avatar: resolvedAvatar,
-      avatar_url: resolvedAvatar,
-      teamSize: existingUser?.teamSize || 'Solo Thinker',
-      useCase: resolvedUseCase,
-      themePreference: resolvedTheme,
-      subscriptionTier: resolvedTier,
-      subscription_plan: resolvedTier,
-      billingCycle: existingUser?.billingCycle || 'monthly',
-      sessionToken: token,
-      isFirstLogin: false,
-      createdAt: existingUser?.createdAt || new Date().toISOString(),
-      is_student: isStudent,
-      student_verification_status: studentStatus,
-      institution_name: institutionName,
-    };
-
-    const newSession: AuthSession = {
-      token,
-      expiresAt,
-      issuedAt: Date.now(),
-      userId: profile.id,
-      role: profile.role,
-    };
-
-    try {
-      localStorage.setItem(STORAGE_KEY_TOKEN, token);
-      localStorage.setItem(STORAGE_KEY_SESSION, JSON.stringify(newSession));
-      localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(profile));
-      localStorage.setItem(STORAGE_KEY_ONBOARDED, 'true');
-      localStorage.setItem(STORAGE_KEY_PROFILE_DONE, 'true');
-      if (rememberMe) {
-        localStorage.setItem(STORAGE_KEY_REMEMBER, 'true');
-      } else {
-        localStorage.removeItem(STORAGE_KEY_REMEMBER);
-      }
-      saveToUserRegistry(profile);
-    } catch (e) {
-      console.error('[Auth] Failed to write session to localStorage:', e);
-    }
-
-    setHasCompletedProfileSetup(true);
-    setUser(profile);
-    setSession(newSession);
-    setIsOnboarded(true);
-    setAuthStatus('authenticated');
-    setIsRehydrating(false);
+  const login = async (email: string, password: string, _rememberMe = true): Promise<boolean> => {
+    if (!supabase) throw new Error('Supabase is not configured. Please add the required environment variables.');
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: email.trim().toLowerCase(),
+      password,
+    });
+    if (error) throw error;
+    if (!data.session || !data.user) throw new Error('Sign-in did not return a valid session.');
     setNotification(null);
     return true;
   };
 
-  const signup = async (name: string, email: string, _password: string): Promise<boolean> => {
-    const token = `vocal_sess_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-    const expiresAt = Date.now() + 24 * 60 * 60 * 1000;
-    const cleanEmail = email.trim().toLowerCase();
-    const cleanName = name.trim() || 'New Creator';
-
-    const isStudentEmail = /@(.*\.)?(edu|ac\.in|edu\.in|ac\.uk|edu\.au|edu\.sg|school|uni)/i.test(cleanEmail);
-
-    const userAvatar = draftProfile?.avatar || generateInitialsAvatar(cleanName);
-    const userRole = draftProfile?.role || (isStudentEmail ? 'Student / Scholar' : 'Member');
-    const userUseCase = draftProfile?.useCase || 'Voice Ideation';
-    const userTheme = draftProfile?.themePreference || 'Warm Paper';
-    const isStudent = Boolean(draftProfile?.isStudent || isStudentEmail);
-
-    const newUser: UserProfile = {
-      id: `usr_${Date.now()}`,
-      name: cleanName,
-      displayName: cleanName,
-      full_name: cleanName,
-      user_metadata: {
-        full_name: cleanName,
-        name: cleanName,
-        email: cleanEmail,
-        avatar_url: userAvatar,
+  const signup = async (name: string, email: string, password: string): Promise<boolean> => {
+    if (!supabase) throw new Error('Supabase is not configured. Please add the required environment variables.');
+    const cleanName = name.trim();
+    const { data, error } = await supabase.auth.signUp({
+      email: email.trim().toLowerCase(),
+      password,
+      options: {
+        data: {
+          full_name: cleanName,
+          name: cleanName,
+          avatar_url: draftProfile?.avatar || generateInitialsAvatar(cleanName),
+          role: draftProfile?.role || 'Creator & Thinker',
+          use_case: draftProfile?.useCase || 'Voice Ideation',
+          team_size: 'Solo Thinker',
+          theme_preference: draftProfile?.themePreference || 'Ocean Teal',
+        },
+        emailRedirectTo: window.location.origin,
       },
-      email: cleanEmail,
-      role: userRole,
-      avatar: userAvatar,
-      avatar_url: userAvatar,
-      useCase: userUseCase,
-      themePreference: userTheme,
-      subscriptionTier: 'free',
-      subscription_plan: 'free',
-      billingCycle: 'monthly',
-      sessionToken: token,
-      isFirstLogin: false,
-      createdAt: new Date().toISOString(),
-      is_student: isStudent,
-      student_verification_status: isStudent ? 'verified' : 'none',
-      institution_name: isStudentEmail ? cleanEmail.split('@')[1] : (draftProfile?.role?.includes('Student') ? 'Academic Institution' : ''),
-      student_email: isStudentEmail ? cleanEmail : undefined,
-    };
+    });
+    if (error) throw error;
 
-    const newSession: AuthSession = {
-      token,
-      expiresAt,
-      issuedAt: Date.now(),
-      userId: newUser.id,
-      role: newUser.role,
-    };
-
-    try {
-      localStorage.setItem(STORAGE_KEY_TOKEN, token);
-      localStorage.setItem(STORAGE_KEY_SESSION, JSON.stringify(newSession));
-      localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(newUser));
-      localStorage.setItem(STORAGE_KEY_ONBOARDED, 'true');
-      localStorage.setItem(STORAGE_KEY_PROFILE_DONE, 'true');
-      saveToUserRegistry(newUser);
-    } catch (e) {
-      console.error('[Auth] Failed to write session to localStorage:', e);
+    if (!data.session) {
+      setNotification({
+        type: 'success',
+        message: 'Account created. Please check your email and confirm your address before signing in.',
+      });
+      return false;
     }
-
-    setHasCompletedProfileSetup(true);
-    setUser(newUser);
-    setSession(newSession);
-    setIsOnboarded(true);
-    setAuthStatus('authenticated');
-    setIsRehydrating(false);
-    setNotification(null);
+    setNotification({ type: 'success', message: 'Your Vocal Note account is ready.' });
     return true;
   };
 
   const socialLogin = async (provider: 'google' | 'github'): Promise<boolean> => {
-    const providerEmail = provider === 'google' ? 'student.scholar@stanford.edu' : 'github.creator@dev.io';
-    const providerName = provider === 'google' ? 'Alex Rivera (Stanford Student)' : 'Devon Vance';
-    const isStudentEmail = provider === 'google';
+    if (!supabase) throw new Error('Supabase is not configured. Please add the required environment variables.');
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider,
+      options: { redirectTo: window.location.origin },
+    });
+    if (error) throw error;
+    // Supabase performs a full-page redirect to the selected identity provider.
+    return true;
+  };
 
-    const token = `vocal_sess_social_${provider}_${Date.now()}`;
-    const expiresAt = Date.now() + 24 * 60 * 60 * 1000;
-    const socialAvatar = generateInitialsAvatar(providerName);
-
-    const profile: UserProfile = {
-      id: `usr_${provider}_${Date.now()}`,
-      name: providerName,
-      displayName: providerName,
-      full_name: providerName,
-      user_metadata: {
-        full_name: providerName,
-        name: providerName,
-        email: providerEmail,
-        avatar_url: socialAvatar,
-      },
-      email: providerEmail,
-      role: isStudentEmail ? 'Graduate Student / Researcher' : 'Fullstack Developer',
-      avatar: socialAvatar,
-      avatar_url: socialAvatar,
-      teamSize: '1-3 members',
-      useCase: 'Audio Notes & Study Lectures',
-      themePreference: 'Ocean Teal',
-      subscriptionTier: 'free',
-      subscription_plan: 'free',
-      billingCycle: 'monthly',
-      sessionToken: token,
-      isFirstLogin: false,
-      createdAt: new Date().toISOString(),
-      is_student: isStudentEmail,
-      student_verification_status: isStudentEmail ? 'verified' : 'none',
-      institution_name: isStudentEmail ? 'Stanford University' : '',
-      student_email: isStudentEmail ? providerEmail : undefined,
-      student_verified_at: isStudentEmail ? new Date().toISOString() : undefined,
-    };
-
-    const newSession: AuthSession = {
-      token,
-      expiresAt,
-      issuedAt: Date.now(),
-      userId: profile.id,
-      role: profile.role,
-    };
-
-    try {
-      localStorage.setItem(STORAGE_KEY_TOKEN, token);
-      localStorage.setItem(STORAGE_KEY_SESSION, JSON.stringify(newSession));
-      localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(profile));
-      localStorage.setItem(STORAGE_KEY_ONBOARDED, 'true');
-      localStorage.setItem(STORAGE_KEY_PROFILE_DONE, 'true');
-      saveToUserRegistry(profile);
-    } catch (e) {
-      console.error('[Auth] Failed to write session to localStorage:', e);
-    }
-
-    setHasCompletedProfileSetup(true);
-    setUser(profile);
-    setSession(newSession);
-    setIsOnboarded(true);
-    setAuthStatus('authenticated');
-    setIsRehydrating(false);
-    setNotification(null);
+  const sendPasswordReset = async (email: string): Promise<boolean> => {
+    if (!supabase) throw new Error('Supabase is not configured. Please add the required environment variables.');
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail) throw new Error('Enter your email address first.');
+    const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
+      redirectTo: window.location.origin,
+    });
+    if (error) throw error;
+    setNotification({ type: 'success', message: 'If an account exists for that email, a password reset link has been sent.' });
     return true;
   };
 
@@ -649,6 +427,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const confirmLogout = () => {
     console.info('[Auth] User confirmed sign out. Purging session.');
+    if (supabase) void supabase.auth.signOut();
     localStorage.removeItem(STORAGE_KEY_TOKEN);
     localStorage.removeItem(STORAGE_KEY_SESSION);
     localStorage.removeItem(STORAGE_KEY_USER);
@@ -1041,6 +820,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isProfileDrawerOpen,
         isStudentVerificationModalOpen,
         login,
+        sendPasswordReset,
         signup,
         socialLogin,
         logout,
