@@ -14,7 +14,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   initialMode = 'login',
   draftProfile,
 }) => {
-  const { login, signup, socialLogin, sendPasswordReset, notification, clearNotification } = useAuth();
+  const { login, signup, socialLogin, sendPasswordReset, updatePassword, isPasswordRecovery, notification, clearNotification } = useAuth();
   const { navigate } = useAppRouter();
 
   const [mode, setMode] = useState<'login' | 'signup'>(initialMode);
@@ -43,6 +43,12 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   const validate = (): boolean => {
     const nextErrors: { name?: string; email?: string; password?: string } = {};
 
+    if (isPasswordRecovery) {
+      if (password.length < 8) nextErrors.password = 'Use at least 8 characters for your new password.';
+      setErrors(nextErrors);
+      return Object.keys(nextErrors).length === 0;
+    }
+
     if (mode === 'signup' && !name.trim()) {
       nextErrors.name = 'Please enter your name';
     }
@@ -70,7 +76,10 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     setIsSubmitting(true);
     setErrors({});
     try {
-      if (mode === 'login') {
+      if (isPasswordRecovery) {
+        await updatePassword(password);
+        navigate('/dashboard', { replace: true });
+      } else if (mode === 'login') {
         await login(email, password, rememberMe);
         navigate('/dashboard', { replace: true });
       } else {
@@ -188,15 +197,16 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
           {/* Header Copy */}
           <div className="mb-6">
             <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-zinc-900">
-              {mode === 'login' ? 'Sign in to Vocal Note' : 'Create your account'}
+              {isPasswordRecovery ? 'Choose a new password' : mode === 'login' ? 'Sign in to Vocal Note' : 'Create your account'}
             </h1>
             <p className="text-xs sm:text-sm text-zinc-500 mt-1">
-              {mode === 'login'
+              {isPasswordRecovery ? 'Enter and confirm a new password for your account.' : mode === 'login'
                 ? 'Enter your credentials to access your audio workspace.'
                 : 'Link your credentials to save and sync your vocal collection.'}
             </p>
           </div>
 
+          {!isPasswordRecovery && (
           {/* Social Auth Buttons */}
           <div className="grid grid-cols-2 gap-3 mb-6">
             <button
@@ -248,6 +258,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
             </span>
           </div>
 
+          )}
+
           {/* Form with edge-to-edge inputs */}
           <form onSubmit={handleSubmit} className="space-y-4">
             {mode === 'signup' && (
@@ -275,6 +287,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
               </div>
             )}
 
+            {!isPasswordRecovery && (
             <div>
               <label className="block text-xs font-semibold text-zinc-700 mb-1.5">
                 Email Address
@@ -294,10 +307,12 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
               {errors.email && <p className="text-[11px] text-rose-500 mt-1 font-medium">{errors.email}</p>}
             </div>
 
+            )}
+
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <label className="text-xs font-semibold text-zinc-700">
-                  Password
+                  {isPasswordRecovery ? 'New Password' : 'Password'}
                 </label>
                 {mode === 'login' && (
                   <button
@@ -341,7 +356,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
             </div>
 
             {/* Remember Me Toggle */}
-            <div className="pt-1 flex items-center justify-between">
+            {!isPasswordRecovery && <div className="pt-1 flex items-center justify-between">
               <label className="flex items-center gap-2 cursor-pointer select-none">
                 <input
                   type="checkbox"
@@ -356,7 +371,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                 <ShieldCheck size={13} className="text-emerald-500" />
                 <span>256-bit encrypted</span>
               </div>
-            </div>
+            </div>}
 
             {/* Sticky / Full-width Primary Action Button (>= 48px touch target) */}
             <div className="pt-2">
@@ -369,7 +384,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                   <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                 ) : (
                   <>
-                    <span>{mode === 'login' ? 'Sign In' : 'Create Account & Continue'}</span>
+                    <span>{isPasswordRecovery ? 'Update Password' : mode === 'login' ? 'Sign In' : 'Create Account & Continue'}</span>
                     <ArrowRight size={15} />
                   </>
                 )}
@@ -378,7 +393,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
           </form>
 
           {/* Switch mode footer */}
-          <div className="mt-6 pt-5 border-t border-zinc-100 text-center">
+          {!isPasswordRecovery && <div className="mt-6 pt-5 border-t border-zinc-100 text-center">
             {mode === 'login' ? (
               <p className="text-xs text-zinc-500">
                 New to Vocal Note?{' '}
@@ -402,7 +417,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                 </button>
               </p>
             )}
-          </div>
+          </div>}
         </motion.div>
       </main>
 
