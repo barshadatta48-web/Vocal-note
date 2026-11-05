@@ -364,22 +364,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [expireSession]);
 
   const login = async (email: string, password: string, _rememberMe = true): Promise<boolean> => {
-    if (!supabase) throw new Error('Supabase is not configured. Please add the required environment variables.');
+    if (!supabase || !isSupabaseConfigured) {
+      throw new Error('Supabase is not configured. Please add the required environment variables.');
+    }
 
-    // A previous Supabase session must not make an invalid credential attempt
-    // appear successful. Clear any existing local session before validating
-    // the credentials entered on this login form.
-    const { data: currentData, error: sessionError } = await supabase.auth.getSession();
-    if (sessionError) throw sessionError;
-    if (currentData.session) {
-      const { error: signOutError } = await supabase.auth.signOut();
-      if (signOutError) {
-        throw new Error('Could not clear the previous session. Please try signing in again.');
-      }
-      setUser(null);
-      setSession(null);
-      setAuthStatus('unauthenticated');
-      setIsOnboarded(false);
+    // Always reset in-memory and legacy browser auth state before validating
+    // credentials. This prevents a stale/demo profile from keeping the
+    // protected dashboard visible after an invalid password attempt.
+    setUser(null);
+    setSession(null);
+    setAuthStatus('unauthenticated');
+    setIsOnboarded(false);
+    setIsPasswordRecovery(false);
+    localStorage.removeItem(STORAGE_KEY_TOKEN);
+    localStorage.removeItem(STORAGE_KEY_SESSION);
+    localStorage.removeItem(STORAGE_KEY_USER);
+    localStorage.removeItem(STORAGE_KEY_ONBOARDED);
+    localStorage.removeItem(STORAGE_KEY_REMEMBER);
+
+    // Clear any persisted Supabase session locally before checking the new
+    // credentials. A failed sign-in must never inherit an earlier session.
+    const { error: signOutError } = await supabase.auth.signOut({ scope: 'local' });
+    if (signOutError) {
+      throw new Error('Could not reset the previous sign-in session. Please try again.');
     }
 
     const { data, error } = await supabase.auth.signInWithPassword({
@@ -387,20 +394,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       password,
     });
 
-    if (error) {
-      // Never retain a previous identity after a failed credential attempt.
+    if (error || !data.session || !data.user) {
+      // Keep the app unauthenticated even if Supabase rejects the credentials.
+      await supabase.auth.signOut({ scope: 'local' });
       setUser(null);
       setSession(null);
       setAuthStatus('unauthenticated');
       setIsOnboarded(false);
-      throw error;
-    }
-    if (!data.session || !data.user) {
-      setUser(null);
-      setSession(null);
-      setAuthStatus('unauthenticated');
-      setIsOnboarded(false);
-      throw new Error('Sign-in did not return a valid session. Please try again.');
+      throw error || new Error('Sign-in did not return a valid session. Please check your email and password.');
     }
 
     setNotification(null);
