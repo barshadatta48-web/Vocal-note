@@ -42,9 +42,9 @@ Do not put OAuth client secrets in this repository or in Vite environment variab
 In Vercel → Vocal-note → Settings → Environment Variables, add these for Production, Preview and Development:
 
 - `VITE_SUPABASE_URL` = your Supabase Project URL
-- `VITE_SUPABASE_ANON_KEY` = your Supabase anon/publishable public key
+- `VITE_SUPABASE_PUBLISHABLE_KEY` = your Supabase publishable public key
 
-Use only the public anon/publishable key in the browser. **Never use the Supabase service-role key** in a `VITE_*` variable or commit it to GitHub.
+The app also accepts the legacy `VITE_SUPABASE_ANON_KEY` variable as a fallback. Use only the public publishable/anon key in the browser. **Never use the Supabase service-role key** in a `VITE_*` variable or commit it to GitHub.
 
 After saving the variables, redeploy the Vercel preview for this branch. Vite environment variables are embedded at build time.
 
