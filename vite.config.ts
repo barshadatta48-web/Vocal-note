@@ -29,7 +29,6 @@ export default defineConfig(({mode}) => {
         output: {
           manualChunks: {
             'vendor-react': ['react', 'react-dom'],
-            'vendor-konva': ['konva', 'react-konva'],
             'vendor-genai': ['@google/genai'],
           },
         },
