@@ -74,6 +74,7 @@ export const AuthGuard: React.FC<AuthGuardProps> = ({ children }) => {
   const {
     isRehydrating,
     isAuthenticated,
+    isPasswordRecovery,
     isOnboarded,
     user,
     session,
@@ -119,6 +120,11 @@ export const AuthGuard: React.FC<AuthGuardProps> = ({ children }) => {
   // REHYDRATION LIFECYCLE: Prevents UI flicker while reading session from persistent storage
   if (isRehydrating) {
     return <AuthSkeleton />;
+  }
+
+  // Supabase password-recovery links return an authenticated recovery session.
+  if (isPasswordRecovery) {
+    return <AuthScreen initialMode="login" draftProfile={draftProfile} />;
   }
 
   // STEP 2: PROFILE CREATION STATE (For new unauthenticated users before credentials handshake)
