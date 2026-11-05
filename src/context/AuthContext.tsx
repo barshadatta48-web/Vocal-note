@@ -29,6 +29,8 @@ interface AuthContextType {
   isStudentVerificationModalOpen: boolean;
   login: (email: string, password: string, rememberMe?: boolean) => Promise<boolean>;
   sendPasswordReset: (email: string) => Promise<boolean>;
+  updatePassword: (password: string) => Promise<boolean>;
+  isPasswordRecovery: boolean;
   signup: (name: string, email: string, password: string) => Promise<boolean>;
   socialLogin: (provider: 'google' | 'github') => Promise<boolean>;
   logout: () => void;
@@ -136,6 +138,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<UserProfile | null>(null);
   const [session, setSession] = useState<AuthSession | null>(null);
   const [authStatus, setAuthStatus] = useState<AuthStatus>('verifying');
+  const [isPasswordRecovery, setIsPasswordRecovery] = useState(false);
   const [isOnboarded, setIsOnboarded] = useState<boolean>(false);
   const [notification, setNotification] = useState<AuthNotification | null>(null);
 
@@ -286,7 +289,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return () => { mounted = false; };
     }
 
-    const { data: authListener } = supabase.auth.onAuthStateChange((_event, authSession) => {
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, authSession) => {
+      if (event === 'PASSWORD_RECOVERY') setIsPasswordRecovery(true);
       applySupabaseSession(authSession);
     });
 
@@ -417,6 +421,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
     if (error) throw error;
     setNotification({ type: 'success', message: 'If an account exists for that email, a password reset link has been sent.' });
+    return true;
+  };
+
+  const updatePassword = async (password: string): Promise<boolean> => {
+    if (!supabase) throw new Error('Supabase is not configured.');
+    if (password.length < 8) throw new Error('Use a password with at least 8 characters.');
+    const { error } = await supabase.auth.updateUser({ password });
+    if (error) throw error;
+    setIsPasswordRecovery(false);
+    setNotification({ type: 'success', message: 'Your password has been updated successfully.' });
     return true;
   };
 
@@ -821,6 +835,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isStudentVerificationModalOpen,
         login,
         sendPasswordReset,
+        updatePassword,
+        isPasswordRecovery,
         signup,
         socialLogin,
         logout,
