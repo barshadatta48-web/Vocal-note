@@ -80,7 +80,10 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
         await updatePassword(password);
         navigate('/dashboard', { replace: true });
       } else if (mode === 'login') {
-        await login(email, password, rememberMe);
+        const authenticated = await login(email, password, rememberMe);
+        if (!authenticated) {
+          throw new Error('Sign-in was not completed. Please check your email and password.');
+        }
         navigate('/dashboard', { replace: true });
       } else {
         const authenticated = await signup(name, email, password);
