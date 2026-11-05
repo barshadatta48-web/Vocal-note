@@ -14,7 +14,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   initialMode = 'login',
   draftProfile,
 }) => {
-  const { login, signup, socialLogin, notification, clearNotification } = useAuth();
+  const { login, signup, socialLogin, sendPasswordReset, notification, clearNotification } = useAuth();
   const { navigate } = useAppRouter();
 
   const [mode, setMode] = useState<'login' | 'signup'>(initialMode);
@@ -71,13 +71,12 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     setErrors({});
     try {
       if (mode === 'login') {
-        // Sequential handshake: user credentials verified & session stored atomically
         await login(email, password, rememberMe);
+        navigate('/dashboard', { replace: true });
       } else {
-        // Brand-new registration handshake: stores session & grants full dashboard access
-        await signup(name, email, password);
+        const authenticated = await signup(name, email, password);
+        if (authenticated) navigate('/dashboard', { replace: true });
       }
-      navigate('/dashboard', { replace: true });
     } catch (err: any) {
       setErrors({
         general: err?.message || 'Authentication failed. Please verify your credentials.',
@@ -92,7 +91,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     setErrors({});
     try {
       await socialLogin(provider);
-      navigate('/dashboard', { replace: true });
+      // Supabase redirects the browser to Google/GitHub; do not navigate before OAuth returns.
     } catch (err: any) {
       setErrors({ general: err?.message || 'Social authentication failed.' });
     } finally {
@@ -301,9 +300,22 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                   Password
                 </label>
                 {mode === 'login' && (
-                  <span className="text-[11px] text-zinc-400 hover:text-zinc-700 cursor-pointer transition-colors">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setErrors({});
+                      try {
+                        await sendPasswordReset(email);
+                        setErrors({ general: 'If an account exists for this email, a password reset link has been sent.' });
+                      } catch (err: any) {
+                        setErrors({ general: err?.message || 'Could not send the password reset email.' });
+                      }
+                    }}
+                    disabled={isSubmitting}
+                    className="text-[11px] text-zinc-400 hover:text-zinc-700 cursor-pointer transition-colors disabled:opacity-50"
+                  >
                     Forgot password?
-                  </span>
+                  </button>
                 )}
               </div>
               <div className="relative">
