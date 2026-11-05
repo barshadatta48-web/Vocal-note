@@ -207,6 +207,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
           </div>
 
           {!isPasswordRecovery && (
+          <>
           {/* Social Auth Buttons */}
           <div className="grid grid-cols-2 gap-3 mb-6">
             <button
@@ -257,7 +258,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
               or continue with email
             </span>
           </div>
-
+          </>
           )}
 
           {/* Form with edge-to-edge inputs */}
@@ -314,7 +315,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                 <label className="text-xs font-semibold text-zinc-700">
                   {isPasswordRecovery ? 'New Password' : 'Password'}
                 </label>
-                {mode === 'login' && (
+                {mode === 'login' && !isPasswordRecovery && (
                   <button
                     type="button"
                     onClick={async () => {
