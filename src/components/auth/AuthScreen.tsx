@@ -200,7 +200,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
               {isPasswordRecovery ? 'Choose a new password' : mode === 'login' ? 'Sign in to Vocal Note' : 'Create your account'}
             </h1>
             <p className="text-xs sm:text-sm text-zinc-500 mt-1">
-              {isPasswordRecovery ? 'Enter and confirm a new password for your account.' : mode === 'login'
+              {isPasswordRecovery ? 'Enter a new password for your account.' : mode === 'login'
                 ? 'Enter your credentials to access your audio workspace.'
                 : 'Link your credentials to save and sync your vocal collection.'}
             </p>
