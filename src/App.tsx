@@ -21,14 +21,6 @@ import { StudentVerificationModal } from './components/auth/StudentVerificationM
 import { LogoutConfirmModal } from './components/auth/LogoutConfirmModal';
 import { UserProfileDropdown } from './components/auth/UserProfileDropdown';
 
-interface DrawingLine {
-  tool: string;
-  points: number[];
-  color: string;
-  strokeWidth: number;
-}
-
-// Legacy drawing fields are retained only so older backups still load safely.
 interface Note {
   id: string;
   content: string; // HTML content
@@ -39,8 +31,6 @@ interface Note {
   y: number;
   image?: string;
   completed?: boolean;
-  drawingLines?: DrawingLine[];
-  drawingOffset?: { x: number; y: number };
   fontSize?: number;
   updatedAt?: number | Date | string;
 }
@@ -51,7 +41,6 @@ interface Template {
   content: string;
   color: string;
   pattern?: string;
-  drawingLines?: DrawingLine[];
   image?: string;
   fontSize?: number;
 }
@@ -1920,7 +1909,7 @@ function NotesApp() {
             <div className="hidden md:flex items-center gap-2 mt-1.5">
               <div className="h-px w-3 bg-teal-500/30" />
               <p className={`text-[9px] font-black uppercase tracking-[0.15em] leading-none transition-colors duration-500 ${dashboardColor === '#1a1c1e' ? 'text-teal-400/60' : 'text-teal-600/80'}`}>
-                Smart Notes & Canvas
+                Smart Notes
               </p>
             </div>
           </div>
