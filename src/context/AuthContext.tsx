@@ -206,6 +206,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const applySupabaseSession = (authSession: any) => {
       if (!mounted) return;
       if (!authSession?.user) {
+        // Remove only legacy authentication artifacts; never clear note or attachment storage.
+        localStorage.removeItem(STORAGE_KEY_TOKEN);
+        localStorage.removeItem(STORAGE_KEY_SESSION);
+        localStorage.removeItem(STORAGE_KEY_USER);
+        localStorage.removeItem(STORAGE_KEY_ONBOARDED);
+        setIsPasswordRecovery(false);
         setUser(null);
         setSession(null);
         setAuthStatus('unauthenticated');
