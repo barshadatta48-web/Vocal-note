@@ -365,12 +365,44 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const login = async (email: string, password: string, _rememberMe = true): Promise<boolean> => {
     if (!supabase) throw new Error('Supabase is not configured. Please add the required environment variables.');
+
+    // A previous Supabase session must not make an invalid credential attempt
+    // appear successful. Clear any existing local session before validating
+    // the credentials entered on this login form.
+    const { data: currentData, error: sessionError } = await supabase.auth.getSession();
+    if (sessionError) throw sessionError;
+    if (currentData.session) {
+      const { error: signOutError } = await supabase.auth.signOut();
+      if (signOutError) {
+        throw new Error('Could not clear the previous session. Please try signing in again.');
+      }
+      setUser(null);
+      setSession(null);
+      setAuthStatus('unauthenticated');
+      setIsOnboarded(false);
+    }
+
     const { data, error } = await supabase.auth.signInWithPassword({
       email: email.trim().toLowerCase(),
       password,
     });
-    if (error) throw error;
-    if (!data.session || !data.user) throw new Error('Sign-in did not return a valid session.');
+
+    if (error) {
+      // Never retain a previous identity after a failed credential attempt.
+      setUser(null);
+      setSession(null);
+      setAuthStatus('unauthenticated');
+      setIsOnboarded(false);
+      throw error;
+    }
+    if (!data.session || !data.user) {
+      setUser(null);
+      setSession(null);
+      setAuthStatus('unauthenticated');
+      setIsOnboarded(false);
+      throw new Error('Sign-in did not return a valid session. Please try again.');
+    }
+
     setNotification(null);
     return true;
   };
