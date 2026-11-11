@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { Plus, Trash2, Edit3, Check, X, Palette, MessageCircle, Send, Sparkles, Loader2, Image as ImageIcon, Camera, MoreVertical, CheckCircle2, Mic, MicOff, ArrowLeft, Wand2, Bold, Type, Minus, Underline, Hand, Maximize, StickyNote, Download, Upload, Bell } from 'lucide-react';
+import { Plus, Trash2, Edit3, Check, X, Palette, MessageCircle, Send, Sparkles, Loader2, Image as ImageIcon, Camera, MoreVertical, CheckCircle2, Mic, MicOff, ArrowLeft, Wand2, Bold, Type, Minus, Underline, Hand, Maximize, StickyNote, Download, Upload, Bell, Star } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { GoogleGenAI } from "@google/genai";
 
@@ -31,6 +31,7 @@ interface Note {
   y: number;
   image?: string;
   completed?: boolean;
+  priority?: boolean;
   fontSize?: number;
   updatedAt?: number | Date | string;
 }
@@ -490,6 +491,7 @@ function NotesApp() {
   const [notes, setNotes] = useState<Note[]>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [viewMode, setViewMode] = useState<'grid' | 'board'>('grid');
+  const [showPriorityOnly, setShowPriorityOnly] = useState(false);
   const [isMobile, setIsMobile] = useState(() => {
     if (typeof window !== 'undefined') {
       return window.innerWidth < 640;
@@ -527,6 +529,7 @@ function NotesApp() {
   // Derived unfinished notes and count (single source of truth)
   const unfinishedNotes = notes.filter((n) => !n.completed);
   const unfinishedCount = unfinishedNotes.length;
+  const visibleNotes = showPriorityOnly ? notes.filter((n) => n.priority) : notes;
   
   // In-app non-blocking Toast notification state (replaces window.alert for iframe compatibility)
   const [toast, setToast] = useState<{ id: string; message: string; type: 'info' | 'warning' | 'error' | 'success' } | null>(null);
@@ -796,6 +799,11 @@ function NotesApp() {
   const markComplete = (id: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
     setNotes(prev => prev.map(n => n.id === id ? { ...n, completed: true, updatedAt: Date.now() } : n));
+  };
+
+  const togglePriority = (id: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setNotes(prev => prev.map(n => n.id === id ? { ...n, priority: !n.priority, updatedAt: Date.now() } : n));
   };
 
   const addNote = (content = '', image?: string, color?: string, pattern?: string) => {
@@ -1916,6 +1924,19 @@ function NotesApp() {
         </div>
         
         <div className="flex items-center gap-1.5 sm:gap-2 md:gap-3 shrink-0">
+          {/* Priority filter */}
+          <button
+            onClick={() => setShowPriorityOnly((current) => !current)}
+            className={`min-w-[38px] min-h-[38px] sm:min-w-[42px] sm:min-h-[42px] px-2 md:px-3 rounded-xl md:rounded-2xl border flex items-center justify-center gap-1.5 transition-all active:scale-95 ${showPriorityOnly ? 'bg-amber-100 text-amber-700 border-amber-300 shadow-sm' : 'bg-black/5 text-slate-500 border-black/5 hover:bg-black/10'}`}
+            title={showPriorityOnly ? 'Show All Notes' : 'Show Priority Notes'}
+            aria-label={showPriorityOnly ? 'Show all notes' : 'Show priority notes'}
+            aria-pressed={showPriorityOnly}
+          >
+            <Star size={17} fill={showPriorityOnly ? 'currentColor' : 'none'} />
+            <span className="hidden md:inline text-[10px] font-black uppercase tracking-widest">Priority</span>
+            <span className="text-[10px] font-black">{notes.filter((n) => n.priority).length}</span>
+          </button>
+
           {/* View Mode Toggle - Icon only on mobile */}
           <div className="flex items-center bg-black/5 rounded-xl md:rounded-2xl p-0.5 md:p-1 border border-black/5">
              <button
@@ -2133,17 +2154,17 @@ function NotesApp() {
         className={`mx-auto pt-[76px] sm:pt-[96px] md:pt-[130px] pb-16 relative z-10 min-h-[calc(100vh-120px)] w-full max-w-full overflow-x-hidden ${isBoardActive ? 'w-full' : 'max-w-[1600px] px-3.5 sm:px-6 md:px-8'}`}
         style={isBoardActive ? { minHeight: `${Math.max(600, ...notes.map(n => (n.y || 0) + 400))}px` } : {}}
       >
-        {notes.length === 0 ? (
+        {visibleNotes.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 sm:py-24 md:py-32 text-slate-400 px-4">
             <div className="p-5 sm:p-6 md:p-8 rounded-full bg-white shadow-inner mb-4 sm:mb-6 border border-black/5">
                <Plus className="opacity-20 w-8 h-8 md:w-12 md:h-12" size={32} />
             </div>
-            <p className="text-base sm:text-lg md:text-xl font-semibold opacity-30 italic text-center max-w-xs sm:max-w-md">Start your vocal collection...</p>
+            <p className="text-base sm:text-lg md:text-xl font-semibold opacity-30 italic text-center max-w-xs sm:max-w-md">{showPriorityOnly ? 'No priority notes yet. Tap the star on any note to mark it important.' : 'Start your vocal collection...'}</p>
           </div>
         ) : (
           <div className={isBoardActive ? "relative w-full min-h-[calc(100vh-140px)]" : "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4 sm:gap-6 md:gap-8 items-start w-full max-w-md sm:max-w-none mx-auto"}>
             <AnimatePresence mode="popLayout">
-              {notes.map((note) => (
+              {visibleNotes.map((note) => (
                 <motion.div
                   key={note.id}
                   layout={!isBoardActive}
@@ -2195,7 +2216,10 @@ function NotesApp() {
                        <div className="w-2 h-2 rounded-full bg-white/50" />
                        <span>{new Date().toLocaleDateString('en-US', { month: 'short', day: '2-digit' })}</span>
                     </div>
-                    {note.completed && <span className="bg-black/10 px-2 py-0.5 rounded italic lowercase tracking-normal">Done</span>}
+                    <div className="flex items-center gap-1.5">
+                      {note.priority && <span className="inline-flex items-center gap-1 bg-amber-100/90 text-amber-700 px-2 py-0.5 rounded-full text-[9px] font-black tracking-normal"><Star size={10} fill="currentColor" /> Priority</span>}
+                      {note.completed && <span className="bg-black/10 px-2 py-0.5 rounded italic lowercase tracking-normal">Done</span>}
+                    </div>
                   </div>
 
                   {note.image && (
@@ -2221,7 +2245,16 @@ function NotesApp() {
                   
                   <div className="flex items-center justify-end gap-1.5 sm:gap-2 pt-2 mt-auto shrink-0 w-full opacity-70 sm:opacity-40 sm:group-hover:opacity-100 transition-all transform translate-y-0 relative z-20 pointer-events-auto border-t border-black/[0.04]">
                     <button
-                      onClick={(e) => toggleComplete(note.id, e)}
+                      onClick={(e) => togglePriority(note.id, e)}
+                      className={`min-w-[36px] min-h-[36px] p-2 rounded-xl transition-colors border border-black/10 flex items-center justify-center ${note.priority ? 'bg-amber-400 text-white shadow-sm' : 'bg-white/20 hover:bg-amber-100 text-amber-600'}`}
+                      title={note.priority ? 'Remove Priority' : 'Mark as Priority'}
+                      aria-label={note.priority ? 'Remove priority from note' : 'Mark note as priority'}
+                      aria-pressed={!!note.priority}
+                    >
+                      <Star size={16} fill={note.priority ? 'currentColor' : 'none'} />
+                    </button>
+                    <button
+                      onClick={(e) => toggleComplete(note.id, e)
                       className={`min-w-[36px] min-h-[36px] p-2 rounded-xl transition-colors border border-black/10 flex items-center justify-center ${note.completed ? 'bg-emerald-500 text-white shadow-sm' : 'bg-white/20 hover:bg-emerald-500 hover:text-white text-emerald-600'}`}
                       title={note.completed ? "Mark as Incomplete" : "Mark as Completed"}
                     >
