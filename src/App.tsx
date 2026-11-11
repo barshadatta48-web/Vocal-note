@@ -2254,7 +2254,7 @@ function NotesApp() {
                       <Star size={16} fill={note.priority ? 'currentColor' : 'none'} />
                     </button>
                     <button
-                      onClick={(e) => toggleComplete(note.id, e)
+                      onClick={(e) => toggleComplete(note.id, e)}
                       className={`min-w-[36px] min-h-[36px] p-2 rounded-xl transition-colors border border-black/10 flex items-center justify-center ${note.completed ? 'bg-emerald-500 text-white shadow-sm' : 'bg-white/20 hover:bg-emerald-500 hover:text-white text-emerald-600'}`}
                       title={note.completed ? "Mark as Incomplete" : "Mark as Completed"}
                     >
