@@ -25,6 +25,11 @@ function isValidSnapshot(value: unknown): value is Snapshot {
   );
 }
 
+/** An empty snapshot is valid, but it must not erase a non-empty backup. */
+function hasStoredData(snapshot: Snapshot): boolean {
+  return snapshot.notes.length > 0 || snapshot.templates.length > 0;
+}
+
 function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     if (!canUseIndexedDB()) {
@@ -144,6 +149,18 @@ function persistLegacySnapshot(snapshot: Snapshot): void {
   }
 }
 
+/** Migrate without discarding the legacy backup if the IndexedDB write fails. */
+async function migrateLegacySnapshot(legacy: Snapshot): Promise<Snapshot> {
+  const migrated = { ...legacy, savedAt: legacy.savedAt || Date.now() };
+  try {
+    await writeValue('snapshot', migrated);
+    persistLegacySnapshot(migrated);
+  } catch (migrationError) {
+    console.warn('Could not migrate legacy snapshot to IndexedDB:', migrationError);
+  }
+  return migrated;
+}
+
 export async function loadOfflineSnapshot(): Promise<Snapshot | null> {
   const legacy = readLegacyStorage();
 
@@ -152,6 +169,21 @@ export async function loadOfflineSnapshot(): Promise<Snapshot | null> {
     const isExistingValid = isValidSnapshot(existing);
 
     if (isExistingValid && legacy) {
+      const existingHasData = hasStoredData(existing);
+      const legacyHasData = hasStoredData(legacy);
+
+      // Never let an empty IndexedDB snapshot hide non-empty legacy notes or
+      // templates. This protects data created by older versions of the app.
+      if (!existingHasData && legacyHasData) {
+        return migrateLegacySnapshot(legacy);
+      }
+
+      // Conversely, an empty/older localStorage mirror must not replace real,
+      // newer data already stored in IndexedDB.
+      if (existingHasData && !legacyHasData) {
+        return existing;
+      }
+
       // Prefer IndexedDB on ties and whenever legacy data has no trustworthy
       // save-time metadata. Reading legacy data must never make it look newer.
       if ((existing.savedAt || 0) >= legacy.savedAt) {
@@ -159,27 +191,11 @@ export async function loadOfflineSnapshot(): Promise<Snapshot | null> {
       }
 
       // A genuinely newer legacy snapshot may come from an older app version.
-      // Migrate it immediately so IndexedDB becomes the canonical copy again.
-      const migrated = { ...legacy, savedAt: legacy.savedAt || Date.now() };
-      try {
-        await writeValue('snapshot', migrated);
-      } catch (migrationError) {
-        console.warn('Could not migrate newer legacy snapshot to IndexedDB:', migrationError);
-      }
-      return migrated;
+      return migrateLegacySnapshot(legacy);
     }
 
     if (isExistingValid) return existing;
-    if (legacy) {
-      const migrated = { ...legacy, savedAt: legacy.savedAt || Date.now() };
-      try {
-        await writeValue('snapshot', migrated);
-        persistLegacySnapshot(migrated);
-      } catch (migrationError) {
-        console.warn('Could not migrate legacy snapshot to IndexedDB:', migrationError);
-      }
-      return migrated;
-    }
+    if (legacy) return migrateLegacySnapshot(legacy);
 
     return null;
   } catch (error) {
