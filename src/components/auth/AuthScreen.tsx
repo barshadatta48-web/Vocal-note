@@ -197,9 +197,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
             </p>
           </div>
 
-          {!isPasswordRecovery && (
-          <>
-          )}
 
           {/* Form with edge-to-edge inputs */}
           <form onSubmit={handleSubmit} className="space-y-4">
