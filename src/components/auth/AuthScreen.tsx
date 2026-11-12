@@ -258,7 +258,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                     onClick={async () => {
                       setErrors({});
                       const cleanEmail = email.trim();
-                      if (!cleanEmail || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(cleanEmail)) {
+                      if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
                         setErrors({ email: 'Enter a valid email address first.' });
                         return;
                       }
