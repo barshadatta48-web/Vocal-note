@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Eye, EyeOff, Mail, Lock, ArrowRight, ShieldCheck, Check, AlertCircle, X, Info, User } from 'lucide-react';
+import { Eye, EyeOff, Mail, Lock, ArrowRight, ShieldCheck, Check, AlertCircle, X, Info, User, Github } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from '../../context/AuthContext';
 import { useAppRouter } from '../../context/RouterContext';
@@ -14,7 +14,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   initialMode = 'login',
   draftProfile,
 }) => {
-  const { login, signup, sendPasswordReset, updatePassword, isPasswordRecovery, notification, clearNotification } = useAuth();
+  const { login, signup, socialLogin, sendPasswordReset, updatePassword, isPasswordRecovery, notification, clearNotification } = useAuth();
   const { navigate } = useAppRouter();
 
   const [mode, setMode] = useState<'login' | 'signup'>(initialMode);
@@ -23,6 +23,18 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   const [password, setPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
+
+  const handleSocialLogin = async (provider: 'google' | 'github') => {
+    if (isSubmitting) return;
+    setErrors({});
+    setIsSubmitting(true);
+    try {
+      await socialLogin(provider);
+    } catch (err: any) {
+      setErrors({ general: err?.message || `Could not continue with ${provider === 'google' ? 'Google' : 'GitHub'} sign-in.` });
+      setIsSubmitting(false);
+    }
+  };
   const [errors, setErrors] = useState<{ name?: string; email?: string; password?: string; general?: string }>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -197,6 +209,36 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
             </p>
           </div>
 
+
+          {!isPasswordRecovery && (
+            <div className="mb-5 space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => handleSocialLogin('google')}
+                  disabled={isSubmitting}
+                  className="w-full min-h-[48px] flex items-center justify-center gap-2.5 rounded-xl border border-zinc-200 bg-white text-sm font-semibold text-zinc-700 hover:bg-zinc-50 hover:border-zinc-300 transition-all disabled:opacity-50"
+                >
+                  <span className="font-bold text-base text-[#4285F4]" aria-hidden="true">G</span>
+                  Continue with Google
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSocialLogin('github')}
+                  disabled={isSubmitting}
+                  className="w-full min-h-[48px] flex items-center justify-center gap-2.5 rounded-xl border border-zinc-200 bg-white text-sm font-semibold text-zinc-700 hover:bg-zinc-50 hover:border-zinc-300 transition-all disabled:opacity-50"
+                >
+                  <Github size={18} />
+                  Continue with GitHub
+                </button>
+              </div>
+              <div className="flex items-center gap-3 text-[10px] uppercase tracking-wider font-semibold text-zinc-400">
+                <span className="h-px flex-1 bg-zinc-200" />
+                <span>or use email</span>
+                <span className="h-px flex-1 bg-zinc-200" />
+              </div>
+            </div>
+          )}
 
           {/* Form with edge-to-edge inputs */}
           <form onSubmit={handleSubmit} className="space-y-4">
