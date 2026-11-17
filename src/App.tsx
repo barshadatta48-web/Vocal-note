@@ -31,7 +31,7 @@ interface Note {
   y: number;
   image?: string;
   completed?: boolean;
-  priority?: boolean;
+  priority?: 'red' | 'yellow' | 'green' | boolean; // boolean supports older saved priority notes
   fontSize?: number;
   updatedAt?: number | Date | string;
 }
@@ -801,10 +801,18 @@ function NotesApp() {
     setNotes(prev => prev.map(n => n.id === id ? { ...n, completed: true, updatedAt: Date.now() } : n));
   };
 
-  const togglePriority = (id: string, e?: React.MouseEvent) => {
+  const setPriority = (id: string, priority: 'red' | 'yellow' | 'green', e?: React.MouseEvent) => {
     e?.stopPropagation();
-    setNotes(prev => prev.map(n => n.id === id ? { ...n, priority: !n.priority, updatedAt: Date.now() } : n));
+    setNotes(prev => prev.map(n => n.id === id ? {
+      ...n,
+      priority: (n.priority === priority || (n.priority === true && priority === 'yellow')) ? undefined : priority,
+      updatedAt: Date.now(),
+    } : n));
   };
+
+  const priorityColour = (priority: Note['priority']) => priority === 'red' || priority === 'green' || priority === 'yellow'
+    ? priority
+    : priority ? 'yellow' : null;
 
   const addNote = (content = '', image?: string, color?: string, pattern?: string) => {
     const notePatterns = PATTERNS.filter(p => p !== 'none');
@@ -2217,7 +2225,7 @@ function NotesApp() {
                        <span>{new Date().toLocaleDateString('en-US', { month: 'short', day: '2-digit' })}</span>
                     </div>
                     <div className="flex items-center gap-1.5">
-                      {note.priority && <span className="inline-flex items-center gap-1 bg-amber-100/90 text-amber-700 px-2 py-0.5 rounded-full text-[9px] font-black tracking-normal"><Star size={10} fill="currentColor" /> Priority</span>}
+                      {note.priority && <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black tracking-normal ${priorityColour(note.priority) === 'red' ? 'bg-red-100/90 text-red-700' : priorityColour(note.priority) === 'green' ? 'bg-green-100/90 text-green-700' : 'bg-yellow-100/90 text-yellow-800'}`}><span className={`w-2 h-2 rounded-full ${priorityColour(note.priority) === 'red' ? 'bg-red-500' : priorityColour(note.priority) === 'green' ? 'bg-green-500' : 'bg-yellow-500'}`} /> {priorityColour(note.priority)?.toUpperCase()} PRIORITY</span>}
                       {note.completed && <span className="bg-black/10 px-2 py-0.5 rounded italic lowercase tracking-normal">Done</span>}
                     </div>
                   </div>
@@ -2244,15 +2252,24 @@ function NotesApp() {
                   </div>
                   
                   <div className="flex items-center justify-end gap-1.5 sm:gap-2 pt-2 mt-auto shrink-0 w-full opacity-70 sm:opacity-40 sm:group-hover:opacity-100 transition-all transform translate-y-0 relative z-20 pointer-events-auto border-t border-black/[0.04]">
-                    <button
-                      onClick={(e) => togglePriority(note.id, e)}
-                      className={`min-w-[36px] min-h-[36px] p-2 rounded-xl transition-colors border border-black/10 flex items-center justify-center ${note.priority ? 'bg-amber-400 text-white shadow-sm' : 'bg-white/20 hover:bg-amber-100 text-amber-600'}`}
-                      title={note.priority ? 'Remove Priority' : 'Mark as Priority'}
-                      aria-label={note.priority ? 'Remove priority from note' : 'Mark note as priority'}
-                      aria-pressed={!!note.priority}
-                    >
-                      <Star size={16} fill={note.priority ? 'currentColor' : 'none'} />
-                    </button>
+                    <div className="flex items-center gap-1 px-1" role="group" aria-label="Set note priority">
+                      {(['red', 'yellow', 'green'] as const).map((priority) => {
+                        const active = priorityColour(note.priority) === priority;
+                        const colourClass = priority === 'red' ? 'bg-red-500' : priority === 'green' ? 'bg-green-500' : 'bg-yellow-400';
+                        return (
+                          <button
+                            key={priority}
+                            onClick={(e) => setPriority(note.id, priority, e)}
+                            className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center border-2 transition-all active:scale-90 ${active ? 'border-slate-800 ring-2 ring-white shadow-md scale-105' : 'border-white/80 hover:scale-110 shadow-sm'}`}
+                            title={active ? `Remove ${priority} priority` : `Set ${priority} priority`}
+                            aria-label={active ? `Remove ${priority} priority` : `Set ${priority} priority`}
+                            aria-pressed={active}
+                          >
+                            <span className={`w-3.5 h-3.5 sm:w-4 sm:h-4 rounded-full ${colourClass}`} />
+                          </button>
+                        );
+                      })}
+                    </div>
                     <button
                       onClick={(e) => toggleComplete(note.id, e)}
                       className={`min-w-[36px] min-h-[36px] p-2 rounded-xl transition-colors border border-black/10 flex items-center justify-center ${note.completed ? 'bg-emerald-500 text-white shadow-sm' : 'bg-white/20 hover:bg-emerald-500 hover:text-white text-emerald-600'}`}
