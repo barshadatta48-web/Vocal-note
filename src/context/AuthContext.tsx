@@ -28,6 +28,7 @@ interface AuthContextType {
   isProfileDrawerOpen: boolean;
   isStudentVerificationModalOpen: boolean;
   login: (email: string, password: string, rememberMe?: boolean) => Promise<boolean>;
+  socialLogin: (provider: 'google' | 'github') => Promise<void>;
   sendPasswordReset: (email: string) => Promise<boolean>;
   updatePassword: (password: string) => Promise<boolean>;
   isPasswordRecovery: boolean;
@@ -405,6 +406,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     setNotification(null);
     return true;
+  };
+
+  const socialLogin = async (provider: 'google' | 'github'): Promise<void> => {
+    if (!supabase || !isSupabaseConfigured) {
+      throw new Error('Supabase is not configured. Please add the required environment variables.');
+    }
+    const redirectTo = new URL('/', window.location.origin).toString();
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider,
+      options: { redirectTo },
+    });
+    if (error) throw error;
   };
 
   const signup = async (name: string, email: string, password: string): Promise<boolean> => {
@@ -866,6 +879,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isProfileDrawerOpen,
         isStudentVerificationModalOpen,
         login,
+        socialLogin,
         sendPasswordReset,
         updatePassword,
         isPasswordRecovery,
