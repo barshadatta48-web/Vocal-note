@@ -444,8 +444,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!supabase) throw new Error('Supabase is not configured. Please add the required environment variables.');
     const cleanEmail = email.trim().toLowerCase();
     if (!cleanEmail) throw new Error('Enter your email address first.');
+    // Use a dedicated recovery URL so Supabase returns the user directly to
+    // the password-update flow. Add this exact path to Supabase Auth's
+    // Redirect URLs allow list: https://vocal-note-three.vercel.app/reset-password
+    const redirectTo = new URL('/reset-password', window.location.origin).toString();
     const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
-      redirectTo: window.location.origin,
+      redirectTo,
     });
     if (error) throw error;
     setNotification({ type: 'success', message: 'If an account exists for that email, a password reset link has been sent.' });
