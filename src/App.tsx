@@ -801,18 +801,21 @@ function NotesApp() {
     setNotes(prev => prev.map(n => n.id === id ? { ...n, completed: true, updatedAt: Date.now() } : n));
   };
 
-  const setPriority = (id: string, priority: 'red' | 'yellow' | 'green', e?: React.MouseEvent) => {
-    e?.stopPropagation();
-    setNotes(prev => prev.map(n => n.id === id ? {
-      ...n,
-      priority: (n.priority === priority || (n.priority === true && priority === 'yellow')) ? undefined : priority,
-      updatedAt: Date.now(),
-    } : n));
-  };
+  const priorityColour = (priority: Note['priority']): 'red' | 'yellow' | 'green' | null =>
+    priority === 'red' || priority === 'green' || priority === 'yellow'
+      ? priority
+      : priority ? 'yellow' : null;
 
-  const priorityColour = (priority: Note['priority']) => priority === 'red' || priority === 'green' || priority === 'yellow'
-    ? priority
-    : priority ? 'yellow' : null;
+  // One star cycles through the priority colours; a fourth click clears priority.
+  const cyclePriority = (id: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setNotes(prev => prev.map(n => {
+      if (n.id !== id) return n;
+      const current = priorityColour(n.priority);
+      const next = current === null ? 'red' : current === 'red' ? 'yellow' : current === 'yellow' ? 'green' : undefined;
+      return { ...n, priority: next, updatedAt: Date.now() };
+    }));
+  };
 
   const addNote = (content = '', image?: string, color?: string, pattern?: string) => {
     const notePatterns = PATTERNS.filter(p => p !== 'none');
@@ -2225,7 +2228,7 @@ function NotesApp() {
                        <span>{new Date().toLocaleDateString('en-US', { month: 'short', day: '2-digit' })}</span>
                     </div>
                     <div className="flex items-center gap-1.5">
-                      {note.priority && <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black tracking-normal ${priorityColour(note.priority) === 'red' ? 'bg-red-100/90 text-red-700' : priorityColour(note.priority) === 'green' ? 'bg-green-100/90 text-green-700' : 'bg-yellow-100/90 text-yellow-800'}`}><span className={`w-2 h-2 rounded-full ${priorityColour(note.priority) === 'red' ? 'bg-red-500' : priorityColour(note.priority) === 'green' ? 'bg-green-500' : 'bg-yellow-500'}`} /> {priorityColour(note.priority)?.toUpperCase()} PRIORITY</span>}
+                      {note.priority && <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black tracking-normal ${priorityColour(note.priority) === 'red' ? 'bg-red-100/90 text-red-700' : priorityColour(note.priority) === 'green' ? 'bg-green-100/90 text-green-700' : 'bg-yellow-100/90 text-yellow-800'}`}><Star size={10} fill="currentColor" /> IMPORTANT</span>}
                       {note.completed && <span className="bg-black/10 px-2 py-0.5 rounded italic lowercase tracking-normal">Done</span>}
                     </div>
                   </div>
@@ -2252,24 +2255,21 @@ function NotesApp() {
                   </div>
                   
                   <div className="flex items-center justify-end gap-1.5 sm:gap-2 pt-2 mt-auto shrink-0 w-full opacity-70 sm:opacity-40 sm:group-hover:opacity-100 transition-all transform translate-y-0 relative z-20 pointer-events-auto border-t border-black/[0.04]">
-                    <div className="flex items-center gap-1 px-1" role="group" aria-label="Set note priority">
-                      {(['red', 'yellow', 'green'] as const).map((priority) => {
-                        const active = priorityColour(note.priority) === priority;
-                        const colourClass = priority === 'red' ? 'bg-red-500' : priority === 'green' ? 'bg-green-500' : 'bg-yellow-400';
-                        return (
-                          <button
-                            key={priority}
-                            onClick={(e) => setPriority(note.id, priority, e)}
-                            className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center border-2 transition-all active:scale-90 ${active ? 'border-slate-800 ring-2 ring-white shadow-md scale-105' : 'border-white/80 hover:scale-110 shadow-sm'}`}
-                            title={active ? `Remove ${priority} priority` : `Set ${priority} priority`}
-                            aria-label={active ? `Remove ${priority} priority` : `Set ${priority} priority`}
-                            aria-pressed={active}
-                          >
-                            <span className={`w-3.5 h-3.5 sm:w-4 sm:h-4 rounded-full ${colourClass}`} />
-                          </button>
-                        );
-                      })}
-                    </div>
+                    <button
+                      type="button"
+                      onClick={(e) => cyclePriority(note.id, e)}
+                      className={`min-w-[40px] min-h-[40px] sm:min-w-[42px] sm:min-h-[42px] p-2 rounded-xl border border-black/10 flex items-center justify-center transition-all active:scale-90 hover:bg-white/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 ${
+                        priorityColour(note.priority) === 'red' ? 'text-red-600 bg-red-50/80 shadow-sm' :
+                        priorityColour(note.priority) === 'yellow' ? 'text-amber-500 bg-amber-50/80 shadow-sm' :
+                        priorityColour(note.priority) === 'green' ? 'text-green-600 bg-green-50/80 shadow-sm' :
+                        'text-slate-500 bg-white/30 hover:text-amber-500'
+                      }`}
+                      title={priorityColour(note.priority) ? `Important: ${priorityColour(note.priority)} priority — click to change` : 'Mark as important'}
+                      aria-label={priorityColour(note.priority) ? `Important note, ${priorityColour(note.priority)} priority. Click to change colour` : 'Mark note as important'}
+                      aria-pressed={!!note.priority}
+                    >
+                      <Star size={19} strokeWidth={2.2} fill={priorityColour(note.priority) ? 'currentColor' : 'none'} />
+                    </button>
                     <button
                       onClick={(e) => toggleComplete(note.id, e)}
                       className={`min-w-[36px] min-h-[36px] p-2 rounded-xl transition-colors border border-black/10 flex items-center justify-center ${note.completed ? 'bg-emerald-500 text-white shadow-sm' : 'bg-white/20 hover:bg-emerald-500 hover:text-white text-emerald-600'}`}
