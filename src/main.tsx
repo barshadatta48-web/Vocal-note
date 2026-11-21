@@ -1,5 +1,10 @@
 import { StrictMode, lazy, Suspense } from 'react';
 import { createRoot } from 'react-dom/client';
+import './index.css';
+import { registerPWA } from './pwa';
+import { ErrorBoundary } from './ErrorBoundary';
+import { RouterProvider } from './context/RouterContext';
+import { AuthProvider } from './context/AuthContext';
 import { AuthGuard } from './components/auth/AuthGuard';
 
 const WorkspaceApp = lazy(() => import('./App.tsx'));
@@ -9,11 +14,6 @@ const WorkspaceFallback = () => (
     Opening your workspace…
   </div>
 );
-import './index.css';
-import { registerPWA } from './pwa';
-import { ErrorBoundary } from './ErrorBoundary';
-import { RouterProvider } from './context/RouterContext';
-import { AuthProvider } from './context/AuthContext';
 
 console.log('[Bootstrap] Initializing Vocal Note application...');
 
