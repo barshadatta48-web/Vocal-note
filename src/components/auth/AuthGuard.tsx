@@ -1,61 +1,30 @@
-import React, { useEffect } from 'react';
-import { motion } from 'motion/react';
+import React, { useEffect, lazy, Suspense } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useAppRouter } from '../../context/RouterContext';
-import { SplashScreen } from './SplashScreen';
-import { ProfileCreationStep } from './ProfileCreationStep';
-import { AuthScreen } from './AuthScreen';
-import { OnboardingFlow } from './OnboardingFlow';
+const SplashScreen = lazy(() => import('./SplashScreen').then((module) => ({ default: module.SplashScreen })));
+const ProfileCreationStep = lazy(() => import('./ProfileCreationStep').then((module) => ({ default: module.ProfileCreationStep })));
+const AuthScreen = lazy(() => import('./AuthScreen').then((module) => ({ default: module.AuthScreen })));
+
+const AuthRouteFallback: React.FC = () => (
+  <div className="min-h-screen w-full bg-zinc-50 flex items-center justify-center text-zinc-500 text-sm" role="status">
+    Preparing secure sign-in…
+  </div>
+);
 
 /**
  * Clean, minimalist Session Verification Skeleton Screen
  * Rendered during async session rehydration to prevent UI flash or unauthorized content leaks.
  */
-export const AuthSkeleton: React.FC = () => {
-  return (
-    <div
-      className="min-h-screen w-full bg-zinc-50 flex flex-col items-center justify-center p-6 font-sans antialiased text-zinc-900 select-none"
-      role="status"
-      aria-live="polite"
-    >
-      <motion.div
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-        transition={{ duration: 0.2 }}
-        className="flex flex-col items-center max-w-xs w-full text-center"
-      >
-        {/* Animated Minimal Logo Badge */}
-        <div className="relative mb-5">
-          <div className="w-12 h-12 rounded-2xl bg-zinc-900 text-white flex items-center justify-center font-bold text-lg shadow-sm">
-            V
-          </div>
-          <div className="absolute -inset-1 rounded-2xl border border-zinc-300/80 animate-ping opacity-25 pointer-events-none" />
-        </div>
-
-        <h2 className="text-sm font-semibold text-zinc-900 tracking-tight">
-          Vocal Note
-        </h2>
-        <p className="text-xs text-zinc-400 mt-1 mb-5">
-          Verifying secure workspace session...
-        </p>
-
-        {/* Hairline Progress Indicator */}
-        <div className="w-48 h-1 bg-zinc-200/80 rounded-full overflow-hidden">
-          <motion.div
-            className="h-full bg-zinc-900 rounded-full"
-            initial={{ x: '-100%', width: '40%' }}
-            animate={{ x: '250%' }}
-            transition={{
-              repeat: Infinity,
-              duration: 1.2,
-              ease: 'easeInOut',
-            }}
-          />
-        </div>
-      </motion.div>
+export const AuthSkeleton: React.FC = () => (
+  <div className="min-h-screen w-full bg-zinc-50 flex flex-col items-center justify-center p-6 font-sans antialiased text-zinc-900" role="status" aria-live="polite">
+    <div className="w-12 h-12 rounded-2xl bg-zinc-900 text-white flex items-center justify-center font-bold text-lg mb-4">V</div>
+    <p className="text-sm font-semibold">Vocal Note</p>
+    <p className="text-xs text-zinc-400 mt-1">Verifying secure workspace session…</p>
+    <div className="w-40 h-1 bg-zinc-200 rounded-full overflow-hidden mt-5">
+      <div className="h-full w-1/3 bg-zinc-800 rounded-full animate-pulse" />
     </div>
-  );
-};
+  </div>
+);
 
 export interface AuthGuardProps {
   children: React.ReactNode;
@@ -114,7 +83,7 @@ export const AuthGuard: React.FC<AuthGuardProps> = ({ children }) => {
 
   // STEP 1: SPLASH SCREEN & USER WELCOME (Initial launch gate)
   if (!hasCompletedSplash) {
-    return <SplashScreen onComplete={completeSplashScreen} />;
+    return <Suspense fallback={<AuthRouteFallback />}><SplashScreen onComplete={completeSplashScreen} /></Suspense>;
   }
 
   // REHYDRATION LIFECYCLE: Prevents UI flicker while reading session from persistent storage
@@ -124,17 +93,19 @@ export const AuthGuard: React.FC<AuthGuardProps> = ({ children }) => {
 
   // Supabase password-recovery links return an authenticated recovery session.
   if (isPasswordRecovery) {
-    return <AuthScreen initialMode="login" draftProfile={draftProfile} />;
+    return <Suspense fallback={<AuthRouteFallback />}><AuthScreen initialMode="login" draftProfile={draftProfile} /></Suspense>;
   }
 
   // STEP 2: PROFILE CREATION STATE (For new unauthenticated users before credentials handshake)
   if (!hasValidSession && !hasCompletedProfileSetup) {
     return (
-      <ProfileCreationStep
-        initialData={draftProfile || undefined}
-        onComplete={saveDraftProfile}
-        onAlreadyHaveAccount={skipToAuth}
-      />
+      <Suspense fallback={<AuthRouteFallback />}>
+        <ProfileCreationStep
+          initialData={draftProfile || undefined}
+          onComplete={saveDraftProfile}
+          onAlreadyHaveAccount={skipToAuth}
+        />
+      </Suspense>
     );
   }
 
@@ -142,10 +113,12 @@ export const AuthGuard: React.FC<AuthGuardProps> = ({ children }) => {
   if (!hasValidSession) {
     const isSignup = currentPath === '/signup' || Boolean(draftProfile);
     return (
-      <AuthScreen
-        initialMode={isSignup ? 'signup' : 'login'}
-        draftProfile={draftProfile}
-      />
+      <Suspense fallback={<AuthRouteFallback />}>
+        <AuthScreen
+          initialMode={isSignup ? 'signup' : 'login'}
+          draftProfile={draftProfile}
+        />
+      </Suspense>
     );
   }
 
