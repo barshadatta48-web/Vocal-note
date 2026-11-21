@@ -1,4 +1,5 @@
-const CACHE_NAME = 'vocal-note-pwa-v7';
+// Bump the cache version so installed clients discard stale UI bundles and drawing controls.
+const CACHE_NAME = 'vocal-note-pwa-v8';
 const APP_SHELL = [
   '/',
   '/index.html',
