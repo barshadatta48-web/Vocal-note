@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { Eye, EyeOff, Mail, Lock, ArrowRight, ShieldCheck, Check, AlertCircle, X, Info, User, Github } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from '../../context/AuthContext';
 import { useAppRouter } from '../../context/RouterContext';
 import { DraftProfile } from '../../types/auth';
@@ -134,19 +133,13 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
       {/* Main Centered Content Area */}
       <main className="w-full max-w-md mx-auto px-4 sm:px-6 py-6 sm:py-10 flex-1 flex flex-col justify-center">
         {/* Floating Minimalist Card on PC / Clean edge-to-edge layout on Mobile */}
-        <motion.div
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.25, ease: 'easeOut' }}
+        <div
           className="bg-white sm:rounded-3xl border border-zinc-200/70 sm:shadow-xs p-6 sm:p-9 rounded-2xl"
         >
           {/* Notification Banner for Session Expiry / 401 Alerts */}
-          <AnimatePresence>
+          
             {notification && (
-              <motion.div
-                initial={{ opacity: 0, height: 0, marginBottom: 0 }}
-                animate={{ opacity: 1, height: 'auto', marginBottom: 16 }}
-                exit={{ opacity: 0, height: 0, marginBottom: 0 }}
+              <div
                 className={`p-3.5 rounded-xl border text-xs flex items-start justify-between gap-2.5 ${
                   notification.type === 'warning' || notification.type === 'error'
                     ? 'bg-amber-50/80 border-amber-200 text-amber-900'
@@ -165,9 +158,9 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                 >
                   <X size={14} />
                 </button>
-              </motion.div>
+              </div>
             )}
-          </AnimatePresence>
+          
 
           {/* General Submission Error Banner */}
           {errors.general && (
@@ -406,7 +399,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
               </p>
             )}
           </div>}
-        </motion.div>
+        </div>
       </main>
 
       {/* Footer info */}
