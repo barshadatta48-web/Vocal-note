@@ -1,6 +1,14 @@
-import { StrictMode } from 'react';
+import { StrictMode, lazy, Suspense } from 'react';
 import { createRoot } from 'react-dom/client';
-import App from './App.tsx';
+import { AuthGuard } from './components/auth/AuthGuard';
+
+const WorkspaceApp = lazy(() => import('./App.tsx'));
+
+const WorkspaceFallback = () => (
+  <div className="min-h-screen w-full bg-zinc-50 flex items-center justify-center text-zinc-500 text-sm" role="status">
+    Opening your workspace…
+  </div>
+);
 import './index.css';
 import { registerPWA } from './pwa';
 import { ErrorBoundary } from './ErrorBoundary';
@@ -18,7 +26,11 @@ if (rootElement) {
         <ErrorBoundary>
           <RouterProvider>
             <AuthProvider>
-              <App />
+              <AuthGuard>
+                <Suspense fallback={<WorkspaceFallback />}>
+                  <WorkspaceApp />
+                </Suspense>
+              </AuthGuard>
             </AuthProvider>
           </RouterProvider>
         </ErrorBoundary>
