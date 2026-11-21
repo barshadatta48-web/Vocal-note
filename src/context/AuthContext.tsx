@@ -412,10 +412,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!supabase || !isSupabaseConfigured) {
       throw new Error('Supabase is not configured. Please add the required environment variables.');
     }
-    const redirectTo = new URL('/', window.location.origin).toString();
+    // OAuth must return to the stable production hostname, not a temporary
+    // Vercel preview deployment URL that may no longer exist after consent.
+    const configuredAppUrl = (import.meta.env.VITE_APP_URL as string | undefined)?.trim();
+    const isLocalDevelopment = ['localhost', '127.0.0.1'].includes(window.location.hostname);
+    const redirectOrigin = configuredAppUrl
+      ? new URL(configuredAppUrl).origin
+      : isLocalDevelopment
+        ? window.location.origin
+        : 'https://vocalnotepad.vercel.app';
+    const redirectTo = new URL('/auth/callback', redirectOrigin).toString();
+
     const { error } = await supabase.auth.signInWithOAuth({
       provider,
-      options: { redirectTo },
+      options: {
+        redirectTo,
+        // Supabase uses PKCE by default; keep the browser redirect so the
+        // authorization code is exchanged for a persisted session on return.
+      },
     });
     if (error) throw error;
   };
