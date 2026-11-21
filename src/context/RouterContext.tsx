@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 
 // Password recovery must remain reachable before the user has an active session.
-export const PUBLIC_ROUTES = ['/login', '/signup', '/landing', '/reset-password'] as const;
+export const PUBLIC_ROUTES = ['/login', '/signup', '/landing', '/reset-password', '/auth/callback'] as const;
 
 export type PublicRoute = typeof PUBLIC_ROUTES[number];
 
