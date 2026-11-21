@@ -21,10 +21,10 @@ In **Authentication → URL Configuration**:
 - Site URL: `https://vocalnotepad.vercel.app`
 - Add Redirect URLs:
   - `https://vocalnotepad.vercel.app/**`
-  - `https://*.vercel.app/**` (for Vercel preview deployments)
+  - `https://*.vercel.app/**` (only if preview deployments need OAuth testing)
   - `http://localhost:5173/**` (local development)
 
-The application returns OAuth and email confirmation/recovery flows to the current app origin.
+The production OAuth callback is `https://vocalnotepad.vercel.app/auth/callback`. The app deliberately returns production sign-ins to this stable hostname instead of a temporary Vercel preview URL. Set `VITE_APP_URL` to the canonical app origin in Vercel if the production hostname changes.
 
 ## 4. Configure Google and GitHub OAuth (optional)
 
@@ -43,6 +43,7 @@ In Vercel → Vocal-note → Settings → Environment Variables, add these for P
 
 - `VITE_SUPABASE_URL` = your Supabase Project URL
 - `VITE_SUPABASE_PUBLISHABLE_KEY` = your Supabase publishable public key
+- `VITE_APP_URL` = `https://vocalnotepad.vercel.app` (stable production app origin used for OAuth callbacks)
 
 The app also accepts the legacy `VITE_SUPABASE_ANON_KEY` variable as a fallback. Use only the public publishable/anon key in the browser. **Never use the Supabase service-role key** in a `VITE_*` variable or commit it to GitHub.
 
