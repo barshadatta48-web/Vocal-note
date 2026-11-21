@@ -6,16 +6,12 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Plus, Trash2, Edit3, Check, X, Palette, MessageCircle, Send, Sparkles, Loader2, Image as ImageIcon, Camera, MoreVertical, CheckCircle2, Mic, MicOff, ArrowLeft, Wand2, Bold, Type, Minus, Underline, Hand, Maximize, StickyNote, Download, Upload, Bell, Star } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { GoogleGenAI } from "@google/genai";
 
 import { postProcessSpeechTranscript, aiPostProcessSpeech, detectVoiceCommand, VoiceCommand } from './speechPostProcessor';
 import { loadOfflineSnapshot, saveOfflineSnapshot } from './offlineStorage';
 import { PWAInstallButton } from './PWAInstallButton';
 import { OfflineIndicator } from './OfflineIndicator';
 import { useAuth } from './context/AuthContext';
-import { AuthGuard } from './components/auth/AuthGuard';
-import { AuthScreen } from './components/auth/AuthScreen';
-import { OnboardingFlow } from './components/auth/OnboardingFlow';
 import { SubscriptionView } from './components/auth/SubscriptionView';
 import { StudentVerificationModal } from './components/auth/StudentVerificationModal';
 import { LogoutConfirmModal } from './components/auth/LogoutConfirmModal';
@@ -597,16 +593,7 @@ function NotesApp() {
     }
   };
 
-  // Safely initialize Gemini client so missing keys or browser env never crash render
-  const ai = useMemo(() => {
-    try {
-      const key = (typeof process !== 'undefined' && process.env?.GEMINI_API_KEY) || '';
-      return key ? new GoogleGenAI({ apiKey: key }) : null;
-    } catch (e) {
-      console.warn('Gemini client could not be initialized:', e);
-      return null;
-    }
-  }, []);
+  // Gemini is loaded only if the server-side AI proxy is unavailable.
 
   // Load notes and templates from IndexedDB offline snapshot with localStorage fallback
   useEffect(() => {
@@ -1745,8 +1732,11 @@ function NotesApp() {
           throw new Error('Server proxy unavailable');
         }
       } catch {
-        if (ai) {
-          const response = await ai.models.generateContent({
+        const key = (typeof process !== 'undefined' && process.env?.GEMINI_API_KEY) || '';
+        if (key) {
+          const { GoogleGenAI } = await import('@google/genai');
+          const aiClient = new GoogleGenAI({ apiKey: key });
+          const response = await aiClient.models.generateContent({
             model: "gemini-3.8-flash",
             contents: prompt,
           });
@@ -2985,11 +2975,11 @@ function NotesApp() {
 
 export default function App() {
   return (
-    <AuthGuard>
+    <>
       <NotesApp />
       <SubscriptionView />
       <StudentVerificationModal />
       <LogoutConfirmModal />
-    </AuthGuard>
+    </>
   );
 }
