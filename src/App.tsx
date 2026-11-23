@@ -526,15 +526,15 @@ function NotesApp() {
   const unfinishedNotes = notes.filter((n) => !n.completed);
   const unfinishedCount = unfinishedNotes.length;
   // Priority view is ordered by importance: red (very), yellow (medium), green (less).
-  // Sort a filtered copy so the user's normal note order is never mutated.
+  // Keep this ranking self-contained: priorityColour is declared later in the component.
+  // Sorting a filtered copy leaves the user's normal note order unchanged.
   const visibleNotes = showPriorityOnly
     ? notes
         .filter((n) => n.priority)
         .sort((a, b) => {
-          const priorityRank = { red: 0, yellow: 1, green: 2 } as const;
-          const aPriority = priorityColour(a.priority) ?? 'yellow';
-          const bPriority = priorityColour(b.priority) ?? 'yellow';
-          return priorityRank[aPriority] - priorityRank[bPriority];
+          const priorityRank = (priority: Note['priority']) =>
+            priority === 'red' ? 0 : priority === 'green' ? 2 : 1;
+          return priorityRank(a.priority) - priorityRank(b.priority);
         })
     : notes;
   
