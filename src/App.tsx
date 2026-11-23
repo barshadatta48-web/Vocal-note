@@ -525,7 +525,18 @@ function NotesApp() {
   // Derived unfinished notes and count (single source of truth)
   const unfinishedNotes = notes.filter((n) => !n.completed);
   const unfinishedCount = unfinishedNotes.length;
-  const visibleNotes = showPriorityOnly ? notes.filter((n) => n.priority) : notes;
+  // Priority view is ordered by importance: red (very), yellow (medium), green (less).
+  // Sort a filtered copy so the user's normal note order is never mutated.
+  const visibleNotes = showPriorityOnly
+    ? notes
+        .filter((n) => n.priority)
+        .sort((a, b) => {
+          const priorityRank = { red: 0, yellow: 1, green: 2 } as const;
+          const aPriority = priorityColour(a.priority) ?? 'yellow';
+          const bPriority = priorityColour(b.priority) ?? 'yellow';
+          return priorityRank[aPriority] - priorityRank[bPriority];
+        })
+    : notes;
   
   // In-app non-blocking Toast notification state (replaces window.alert for iframe compatibility)
   const [toast, setToast] = useState<{ id: string; message: string; type: 'info' | 'warning' | 'error' | 'success' } | null>(null);
