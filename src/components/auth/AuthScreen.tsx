@@ -205,28 +205,30 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
 
           {!isPasswordRecovery && (
             <div className="mb-5 space-y-3">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="grid w-full min-w-0 grid-cols-1 min-[421px]:grid-cols-2 gap-3">
                 <button
                   type="button"
                   onClick={() => handleSocialLogin('google')}
                   disabled={isSubmitting}
-                  className="w-full min-h-[48px] flex items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 hover:border-zinc-300 transition-all disabled:opacity-50"
+                  aria-label="Continue with Google"
+                  className="box-border flex w-full min-w-0 min-h-[48px] items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 text-xs font-semibold text-zinc-700 transition-colors hover:bg-zinc-50 hover:border-zinc-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900 focus-visible:ring-offset-2 disabled:opacity-50"
                 >
-                  <span className="w-5 h-5 shrink-0 inline-flex items-center justify-center" aria-hidden="true">
+                  <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center" aria-hidden="true">
                     <span className="font-bold text-base leading-none text-[#4285F4]">G</span>
                   </span>
-                  <span className="whitespace-nowrap leading-none">Continue with Google</span>
+                  <span className="min-w-0 whitespace-nowrap leading-none">Continue with Google</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => handleSocialLogin('github')}
                   disabled={isSubmitting}
-                  className="w-full min-h-[48px] flex items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 hover:border-zinc-300 transition-all disabled:opacity-50"
+                  aria-label="Continue with GitHub"
+                  className="box-border flex w-full min-w-0 min-h-[48px] items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 text-xs font-semibold text-zinc-700 transition-colors hover:bg-zinc-50 hover:border-zinc-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900 focus-visible:ring-offset-2 disabled:opacity-50"
                 >
-                  <span className="w-5 h-5 shrink-0 inline-flex items-center justify-center" aria-hidden="true">
+                  <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center" aria-hidden="true">
                     <Github size={18} className="block" />
                   </span>
-                  <span className="whitespace-nowrap leading-none">Continue with GitHub</span>
+                  <span className="min-w-0 whitespace-nowrap leading-none">Continue with GitHub</span>
                 </button>
               </div>
               <div className="flex items-center gap-3 text-[10px] uppercase tracking-wider font-semibold text-zinc-400">
