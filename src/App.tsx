@@ -1832,15 +1832,10 @@ function NotesApp() {
           throw new Error('Server proxy unavailable');
         }
       } catch {
-        if (ai) {
-          const response = await ai.models.generateContent({
-            model: "gemini-3.8-flash",
-            contents: prompt,
-          });
-          aiResponse = response.text || "I'm sorry, I couldn't process that.";
-        } else {
-          aiResponse = "AI Assistant requires configuring GEMINI_API_KEY in your environment.";
-        }
+        // Keep the browser bundle independent of Gemini credentials and SDK.
+        // AI requests are handled by the server proxy; never reference an
+        // eagerly initialized client that is intentionally no longer loaded.
+        aiResponse = "AI Assistant is temporarily unavailable. Please check your connection and try again.";
       }
 
       setMessages(prev => [...prev, { role: 'assistant', content: aiResponse }]);
