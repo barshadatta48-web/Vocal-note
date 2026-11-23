@@ -210,19 +210,23 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                   type="button"
                   onClick={() => handleSocialLogin('google')}
                   disabled={isSubmitting}
-                  className="w-full min-h-[48px] flex items-center justify-center gap-2.5 rounded-xl border border-zinc-200 bg-white text-sm font-semibold text-zinc-700 hover:bg-zinc-50 hover:border-zinc-300 transition-all disabled:opacity-50"
+                  className="w-full min-h-[48px] flex items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 hover:border-zinc-300 transition-all disabled:opacity-50"
                 >
-                  <span className="font-bold text-base text-[#4285F4]" aria-hidden="true">G</span>
-                  Continue with Google
+                  <span className="w-5 h-5 shrink-0 inline-flex items-center justify-center" aria-hidden="true">
+                    <span className="font-bold text-base leading-none text-[#4285F4]">G</span>
+                  </span>
+                  <span className="whitespace-nowrap leading-none">Continue with Google</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => handleSocialLogin('github')}
                   disabled={isSubmitting}
-                  className="w-full min-h-[48px] flex items-center justify-center gap-2.5 rounded-xl border border-zinc-200 bg-white text-sm font-semibold text-zinc-700 hover:bg-zinc-50 hover:border-zinc-300 transition-all disabled:opacity-50"
+                  className="w-full min-h-[48px] flex items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 hover:border-zinc-300 transition-all disabled:opacity-50"
                 >
-                  <Github size={18} />
-                  Continue with GitHub
+                  <span className="w-5 h-5 shrink-0 inline-flex items-center justify-center" aria-hidden="true">
+                    <Github size={18} className="block" />
+                  </span>
+                  <span className="whitespace-nowrap leading-none">Continue with GitHub</span>
                 </button>
               </div>
               <div className="flex items-center gap-3 text-[10px] uppercase tracking-wider font-semibold text-zinc-400">
